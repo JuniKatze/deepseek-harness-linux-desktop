@@ -4,8 +4,12 @@ import type { AfterPackContext, BeforePackContext } from 'app-builder-lib'
 export interface DesktopElectronBuilderConfig {
   readonly appId: string
   readonly copyright: string
+  readonly productName: string
   readonly artifactName: string
-  readonly protocols: readonly [{ readonly name: 'DeepSeek Harness'; readonly schemes: readonly ['dsh'] }]
+  readonly protocols: readonly {
+    readonly name: string
+    readonly schemes: readonly string[]
+  }[]
   readonly directories: {
     readonly output: string
   }
@@ -45,6 +49,31 @@ export interface DesktopElectronBuilderConfig {
       readonly sign: ((configuration: { path: string, hash: string, isNest: boolean }) => Promise<void>) | undefined
       readonly signingHashAlgorithms: readonly string[]
     }
+  }
+  readonly linux: {
+    readonly executableName: string
+    readonly category: string
+    readonly icon: string
+    readonly target: readonly ['deb']
+    readonly maintainer: string
+    readonly vendor: string
+    readonly synopsis: string
+    readonly description: string
+    readonly syncDesktopName: true
+    readonly desktop: {
+      readonly entry: {
+        readonly StartupWMClass: string
+        readonly Keywords: string
+      }
+    }
+  }
+  readonly deb: {
+    readonly packageName: string
+    readonly packageCategory: string
+    readonly priority: string
+    readonly compression: 'xz'
+    readonly depends: readonly string[]
+    readonly recommends: readonly string[]
   }
   readonly nsis: {
     readonly uninstallDisplayName: '${productName}'

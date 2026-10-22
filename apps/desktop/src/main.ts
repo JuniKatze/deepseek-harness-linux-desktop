@@ -66,6 +66,7 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
+import { desktopOpenProtocol, desktopOpenUrl, desktopUserDataDirectory } from './desktop-identity.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => { await stopOperationReports() }
@@ -87,6 +88,11 @@ const rendererConsole = new RendererConsoleTail()
 
 // Platform-conventional logs directory (macOS ~/Library/Logs/<name>, otherwise under userData);
 // set before ready so the first fatal report already resolves under it.
+if (process.platform === 'linux' && typeof app.setPath === 'function') {
+  const appData = app.getPath('appData')
+  const userData = desktopUserDataDirectory(appData, process.platform)
+  if (userData !== undefined) app.setPath('userData', userData)
+}
 app.setAppLogsPath()
 
 function currentDesktopLocale(): ReturnType<typeof resolveDesktopLocale> {
@@ -512,7 +518,8 @@ async function main(): Promise<void> {
     return next.promise
   }
   const platformView = new DesktopPlatformView(join(app.getAppPath(), 'lib', 'preload-platform-account.cjs'),
-    () => locale.id === 'zh-CN' ? 'zh_CN' : 'en_US', process.platform === 'win32' ? 'win32' : 'darwin',
+    () => locale.id === 'zh-CN' ? 'zh_CN' : 'en_US',
+    process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : null,
     owner => isMandatory() || updateOverlays.input(owner).blocked)
   const backend = new DesktopBackendController((onFailure) => {
     const hostInspectPort = developmentHostInspectPort(development)
@@ -1015,8 +1022,10 @@ async function main(): Promise<void> {
   }
 
   const automaticCheck = (): void => {
-    if (!quitting) void mandatoryPolicy?.check('foreground-or-resume').catch((error: unknown) => { console.error(error) })
-    if (!quitting) void updateSchedule.check().catch((error: unknown) => { console.error(error) })
+    if (!quitting && process.platform !== 'linux') {
+      void mandatoryPolicy?.check('foreground-or-resume').catch((error: unknown) => { console.error(error) })
+      void updateSchedule.check().catch((error: unknown) => { console.error(error) })
+    }
   }
   powerMonitor.on('resume', automaticCheck)
   app.on('will-quit', () => {
@@ -1055,7 +1064,9 @@ async function main(): Promise<void> {
         click: () => { void showAbout().catch((error: unknown) => { console.error(error) }) } }
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
-    { label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } },
+    ...process.platform === 'linux'
+      ? []
+      : [{ label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } }],
     ...process.platform === 'darwin' || process.platform === 'win32'
       ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
     ...development ? [
@@ -1173,6 +1184,11 @@ async function main(): Promise<void> {
     window.on('close', (event) => {
       if (quitting || shellInstallerOwnsQuit || sessionEnding) return
       event.preventDefault()
+      if (process.platform === 'linux') {
+        // Linux has no always-present tray in this local build, so closing follows the ordinary quit path.
+        app.quit()
+        return
+      }
       if (updateDialog.isOpen) { updateDialog.focus(); return }
       const hide = (): void => {
         if (!quitting && !shellInstallerOwnsQuit && !sessionEnding && !window.isDestroyed()) hideMainWindow(window)
@@ -1327,10 +1343,12 @@ async function main(): Promise<void> {
     window.focus()
   }
 
-  if (app.isPackaged || process.env.DSH_DESKTOP_DEV_APP === '1') app.setAsDefaultProtocolClient('dsh')
+  const openProtocol = desktopOpenProtocol(process.platform)
+  const openUrl = desktopOpenUrl(process.platform)
+  if (app.isPackaged || process.env.DSH_DESKTOP_DEV_APP === '1') app.setAsDefaultProtocolClient(openProtocol)
   app.on('open-url', (event, url) => {
     event.preventDefault()
-    if (url === 'dsh://open' || url === 'dsh://open/') focusPrimaryWindow()
+    if (url === openUrl || url === `${openUrl}/`) focusPrimaryWindow()
   })
 
   app.on('activate', (_event, hasVisibleWindows) => {

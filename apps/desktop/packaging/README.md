@@ -95,9 +95,16 @@ Release automation uses fixed target commands so runtime preparation, dsh prepar
 pnpm run package:desktop:mac:arm64
 pnpm run package:desktop:mac:x64
 pnpm run package:desktop:win:x64
+pnpm run package:desktop:linux:x64
 ```
 
-The macOS arm64 command requires Apple Silicon. The macOS x64 command runs on Intel macOS or Apple Silicon with Rosetta. The Windows x64 command requires Windows x64. Linux is not a supported Desktop release target.
+The macOS arm64 command requires Apple Silicon. The macOS x64 command runs on Intel macOS or Apple Silicon with Rosetta. The Windows x64 command requires Windows x64. `linux-x64` requires a Linux x64 build host and currently targets Debian 12 or 13 on amd64.
+
+The Linux command is a local, unsigned `.deb` build. It writes to `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`, does not read update or signing credentials, does not publish, and does not embed an update feed or mandatory-update policy. The Debian package is named `dsh-desktop-linux`, installs the application at `/opt/DSH Linux Desktop/`, and exposes `dsh-linux-desktop`; it can be installed alongside the community `dsh-desktop` package and does not add GUI command-link management. Both applications share `$DSH_HOME/sessions`, credentials, and other product data, while the Linux build exclusively owns `$DSH_HOME/profiles/linux-desktop` and never migrates the plugins or default-model configuration in the older `desktop` profile. Linux Electron user data, including window settings, cookies, caches, and the single-instance lock, lives under `$XDG_CONFIG_HOME/DSH Linux Desktop` (`~/.config/DSH Linux Desktop` by default). Linux Office conversion uses the bundled WASM engine. Use `package:desktop:linux:x64:dir` to stop at the verified `linux-unpacked` application.
+
+The Linux launcher icon comes from the standard-size set in `apps/desktop/resources/linux-icons/` and is installed under `hicolor` from `16` through `1024` pixels. Do not replace it with a single nonstandard-size PNG; Deepin and other launchers may fail to resolve that icon.
+
+Deepin's DDE Shell caches icons for running applications. After replacing an icon, if the launcher still shows a generic icon, run `systemctl --user restart dde-shell@DDE.service` or sign in again before checking; this does not change application data.
 
 Both release and local unsigned macOS DMGs use LZMA compression (`dmg.format: 'ULMO'`) in [the electron-builder configuration](../scripts/electron-builder-config.mjs). A [build-time patch](../../../patches/app-builder-lib@26.17.0.patch) adds this format to the pinned builder's validation and TypeScript declarations.
 

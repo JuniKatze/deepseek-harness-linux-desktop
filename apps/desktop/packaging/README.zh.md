@@ -95,9 +95,16 @@ pnpm run package:desktop
 pnpm run package:desktop:mac:arm64
 pnpm run package:desktop:mac:x64
 pnpm run package:desktop:win:x64
+pnpm run package:desktop:linux:x64
 ```
 
-macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。Linux 不是受支持的 Desktop 发布目标。
+macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。`linux-x64` 要求 Linux x64 构建宿主，当前面向 Debian 12 或 13 的 amd64。
+
+Linux 命令是本地未签名 `.deb` 构建。产物写入 `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，不读取更新或签名凭据，不发布，也不嵌入更新 feed 或强制更新策略。安装包名为 `dsh-desktop-linux`，把应用放在 `/opt/DSH Linux Desktop/` 并提供 `dsh-linux-desktop`；它可与社区构建的 `dsh-desktop` 并行安装，不增加 GUI 命令链接管理。两者共享 `$DSH_HOME/sessions`、凭证和其他产品数据，但 Linux 版独占 `$DSH_HOME/profiles/linux-desktop`，不会迁移旧 `desktop` profile 中的插件或默认模型配置。Linux 版的 Electron 用户数据（包括窗口设置、Cookie、缓存和单实例锁）位于 `$XDG_CONFIG_HOME/DSH Linux Desktop`，默认即 `~/.config/DSH Linux Desktop`。Linux Office 转换使用随包提供的 WASM 引擎。使用 `package:desktop:linux:x64:dir` 可以停在经过验证的 `linux-unpacked` 应用目录。
+
+Linux 启动器图标来自 `apps/desktop/resources/linux-icons/` 的标准尺寸集合，并安装到 `hicolor` 的 `16` 至 `1024` 像素目录。不要改回单张非标准尺寸 PNG，否则 Deepin 等启动器可能无法解析图标。
+
+Deepin 的 DDE Shell 会缓存已运行应用的旧图标。替换图标后如果启动器仍显示通用图标，运行 `systemctl --user restart dde-shell@DDE.service` 或在重新登录后再检查；这不会改变应用数据。
 
 macOS 正式发布和本地未签名 DMG 都通过 [electron-builder 配置](../scripts/electron-builder-config.mjs)中的 `dmg.format: 'ULMO'` 使用 LZMA 压缩。[构建时补丁](../../../patches/app-builder-lib@26.17.0.patch)为固定版本 builder 的校验规则和 TypeScript 声明添加此格式。
 

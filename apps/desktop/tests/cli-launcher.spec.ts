@@ -1,7 +1,7 @@
 /** Installed launcher scripts preserve terminal invocation through a minimal runtime fixture. */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { copyFileSync, mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, relative } from 'node:path'
@@ -46,7 +46,9 @@ function fixture() {
       ? spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', `""${executable}" ${args.map(value => `"${value}"`).join(' ')}"`], {
         cwd: root, env: { ...process.env, DSH_CLI_TEST_VALUE: 'kept' }, stdio: 'pipe', windowsVerbatimArguments: true,
       })
-      : spawn(executable, args, { cwd: root, env: { ...process.env, DSH_CLI_TEST_VALUE: 'kept' }, stdio: 'pipe' })
+      : spawn(executable, args, {
+        cwd: root, env: { ...process.env, DSH_CLI_TEST_VALUE: 'kept' }, stdio: 'pipe',
+      })
     children.push(child)
     const closed = new Promise<number | null>((resolve, reject) => {
       child.once('error', reject)
@@ -84,4 +86,15 @@ it.skipIf(process.platform === 'win32')('resolves chained command symlinks witho
   run.child.stdin.end()
   expect(await run.closed, run.stderr()).toBe(23)
   expect(JSON.parse(run.stdout())).toMatchObject({ args, cwd: f.root, nodeMode: '1' })
+})
+
+it('points the prepared Linux launcher at the parallel desktop executable', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-cli-linux-'))
+  try {
+    const cli = join(root, 'resources', 'runtime', 'cli')
+    prepareDesktopCli(cli, 'linux')
+    expect(readFileSync(join(cli, 'bin', 'dsh'), 'utf8')).toContain('"$resources/../dsh-linux-desktop"')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

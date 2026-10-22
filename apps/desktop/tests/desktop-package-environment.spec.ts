@@ -2,11 +2,17 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { loadDesktopPackageEnvironment, localMacOSPackageEnvironment, validateDesktopPackageEnvironment } from '../scripts/desktop-package-environment.mjs'
+import {
+  loadDesktopPackageEnvironment,
+  localLinuxPackageEnvironment,
+  localMacOSPackageEnvironment,
+  validateDesktopPackageEnvironment,
+} from '../scripts/desktop-package-environment.mjs'
 import { resolveWindowsPackageSettings } from '../scripts/windows-package-settings.mjs'
 
 const WINDOWS = { platform: 'win32', arch: 'x64' } as const
 const MACOS = { platform: 'darwin', arch: 'arm64' } as const
+const LINUX = { platform: 'linux', arch: 'x64' } as const
 const POLICY = { DSH_DESKTOP_MANDATORY_UPDATE_TEST_ORIGIN: 'https://policy.example.com',
   DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({ allowedAuthOrigins: ['https://login.example.com'] }) }
 const RELEASE = { ...POLICY, DSH_DESKTOP_APP_ID: 'com.example.desktop', DOWNLOAD_TEST_ORIGIN: 'https://updates.example.com',
@@ -119,6 +125,27 @@ describe('Desktop local packaging configuration', () => {
     expect(() => { validateDesktopPackageEnvironment(local, MACOS, { unsigned: true }) }).not.toThrow()
     expect(parent.DSH_DESKTOP_UNSIGNED).toBe('0')
     expect(parent.DSH_DESKTOP_APP_ID).toBe('com.example.release')
+  })
+
+  it('selects unsigned local Linux defaults without update or signing configuration', () => {
+    const parent = {
+      PATH: 'build-tools',
+      DSH_DESKTOP_APP_ID: 'com.example.release',
+      DSH_DESKTOP_AUTO_UPDATE_ENV: 'production',
+      DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: 'invalid-json',
+      DSH_DESKTOP_WINDOWS_TOKEN_PIN: 'unused-token',
+      APPLE_API_KEY: 'missing.p8',
+    }
+    const local = localLinuxPackageEnvironment(parent)
+    expect(local).toEqual({
+      PATH: parent.PATH,
+      DSH_DESKTOP_APP_ID: 'io.github.junikatze.dsh-linux-desktop',
+      DSH_DESKTOP_UNSIGNED: '1',
+    })
+    expect(() => { validateDesktopPackageEnvironment(local, LINUX, { unsigned: true }) }).not.toThrow()
+    expect(() => { validateDesktopPackageEnvironment(local, LINUX) }).toThrow(/unsigned local build/u)
+    expect(() => { validateDesktopPackageEnvironment(local, LINUX, { unsigned: true, skipNotarization: true }) })
+      .toThrow(/requires a signed macOS build/u)
   })
 
   it('takes cache concurrency from the Windows file and defaults to four without ambient overrides', async () => {

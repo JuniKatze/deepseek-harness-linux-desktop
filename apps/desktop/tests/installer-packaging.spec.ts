@@ -1,6 +1,6 @@
 import { readInstallerLocales } from '../scripts/installer-locales.mjs'
 import { tmpdir } from 'node:os'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync } from 'node:fs'
 import { Arch, Platform } from 'electron-builder'
 import { AppInfo, Packager } from 'app-builder-lib'
 import { expandMacro } from 'app-builder-lib/out/util/macroExpander.js'
@@ -100,6 +100,53 @@ describe('installer preparation preserves application dependencies', () => {
       DSH_DESKTOP_UNSIGNED: '1',
     }, 'win32', 'x64')
     expect(config.artifactName).toBe('deepseek-harness-${version}-${os}-${arch}-unsigned.${ext}')
+  })
+
+  it('configures Linux as an unsigned Debian build without update or policy integration', async () => {
+    const { createElectronBuilderConfig } = await import('../scripts/electron-builder-config.mjs')
+    const config = createElectronBuilderConfig({
+      DSH_DESKTOP_APP_ID: 'com.example.installer',
+      DSH_DESKTOP_MANDATORY_UPDATE_CONFIG: JSON.stringify({
+        allowedAuthOrigins: ['https://login.example.com'],
+        allowedPageOrigins: ['https://download.example.invalid'],
+      }),
+      DSH_DESKTOP_TARGET_PLATFORM: 'linux',
+      DSH_DESKTOP_TARGET_ARCH: 'x64',
+      DSH_DESKTOP_UNSIGNED: '1',
+    }, 'linux', 'x64')
+    expect(config.linux).toMatchObject({
+      executableName: 'dsh-linux-desktop',
+      target: ['deb'],
+      desktop: {
+        entry: {
+          StartupWMClass: 'dsh-linux-desktop',
+        },
+      },
+    })
+    expect(readdirSync(config.linux.icon).sort()).toEqual([
+      '1024x1024.png',
+      '128x128.png',
+      '16x16.png',
+      '24x24.png',
+      '256x256.png',
+      '32x32.png',
+      '48x48.png',
+      '512x512.png',
+      '64x64.png',
+    ])
+    expect(config.deb).toMatchObject({
+      packageName: 'dsh-desktop-linux',
+      compression: 'xz',
+    })
+    expect(config.productName).toBe('DSH Linux Desktop')
+    expect(config.protocols).toEqual([{ name: 'DSH Linux Desktop', schemes: ['dsh-linux'] }])
+    expect(config.extraMetadata).toMatchObject({
+      desktopName: 'dsh-linux-desktop.desktop',
+      homepage: 'https://github.com/JuniKatze/deepseek-harness-linux-desktop',
+    })
+    expect(config.extraMetadata).not.toHaveProperty('dshMandatoryUpdatePolicy')
+    expect(config.publish).toBeNull()
+    expect(config.artifactName).toBe('dsh-desktop-linux-${version}-linux-${arch}-unsigned.${ext}')
   })
 
   it('packages every preload entry point the shell loads', async () => {
