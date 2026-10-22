@@ -69,19 +69,40 @@ async function probeWindowsInstallerToolchain(environment: NodeJS.ProcessEnv): P
 }
 
 /**
+ * Probe the host utilities used by the Debian package builder.
+ * @returns Every unavailable or unusable tool.
+ */
+async function probeLinuxDebianToolchain(): Promise<DesktopToolchainProbeFailure[]> {
+  const failures: DesktopToolchainProbeFailure[] = []
+  for (const [tool, args] of [
+    ['xz', ['--version']],
+    ['dpkg-deb', ['--version']],
+  ] as const) {
+    try {
+      await run(tool, args, { timeout: 20_000 })
+    }
+    catch (error) {
+      failures.push({ tool, detail: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return failures
+}
+
+/**
  * Probe every external tool one packaging run needs.
  * @param platform - Target platform; a Windows target already requires a Windows build host.
  * @param environment - Packaging environment used to locate Windows tooling.
  * @returns Every probe that failed, empty when the host can run the packaging sequence.
  */
 export async function probeDesktopToolchain(
-  platform: 'darwin' | 'win32',
+  platform: 'darwin' | 'win32' | 'linux',
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<readonly DesktopToolchainProbeFailure[]> {
   const failures: DesktopToolchainProbeFailure[] = []
   const tar = await probeTar()
   if (tar !== undefined) failures.push({ tool: 'tar', detail: tar })
   if (platform === 'win32') failures.push(...await probeWindowsInstallerToolchain(environment))
+  if (platform === 'linux') failures.push(...await probeLinuxDebianToolchain())
   return failures
 }
 
@@ -92,7 +113,7 @@ export async function probeDesktopToolchain(
  * @returns Resolves when every probe passes.
  */
 export async function requireDesktopToolchain(
-  platform: 'darwin' | 'win32',
+  platform: 'darwin' | 'win32' | 'linux',
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<void> {
   const failures = await probeDesktopToolchain(platform, environment)

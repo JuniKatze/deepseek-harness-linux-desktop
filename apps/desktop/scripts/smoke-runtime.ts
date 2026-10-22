@@ -34,9 +34,10 @@ export async function smokeDesktopRuntime(
     npm_config_userconfig: join(home, 'npmrc'), npm_config_globalconfig: join(home, 'npmrc'),
     npm_config_store_dir: join(home, 'store'), npm_config_enable_global_virtual_store: 'false',
   }
-  const host = new DesktopHostProcess(node, root, profile, undefined, hostEnvironment,
+  const createHost = (): DesktopHostProcess => new DesktopHostProcess(node, root, profile, undefined, hostEnvironment,
     undefined, join(resourcesRuntime, 'primary-runtime'),
     { pnpm: join(resourcesRuntime, 'primary-runtime', 'dependencies', 'pnpm', 'bin', 'pnpm.mjs'), nodeBin: join(resourcesRuntime, 'bin') })
+  let host = createHost()
   let timer: ReturnType<typeof setTimeout> | undefined
   try {
     writeFileSync(join(home, 'npmrc'), '')
@@ -149,24 +150,56 @@ export function apply(ctx) {
       timer = setTimeout(() => { reject(new Error('desktop runtime: Host readiness exceeded 120 seconds')) }, 120_000)
     })])
     clearTimeout(timer)
-    const login = await fetch(ready.url, { redirect: 'manual' })
-    const cookie = login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-    const response = await fetch(new URL('/', ready.url), { headers: { cookie } })
+    let hostUrl = ready.url
+    const authenticate = async (url: string): Promise<string> => {
+      const login = await fetch(url, { redirect: 'manual' })
+      return login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    }
+    let cookie = await authenticate(hostUrl)
+    const response = await fetch(new URL('/', hostUrl), { headers: { cookie } })
     if (response.status !== 200 || !(await response.text()).includes('<html')) {
       throw new Error('desktop runtime: packaged frontend smoke failed')
     }
-    const pluginResponse = await fetch(new URL('/desktop-smoke', ready.url), { headers: { cookie } })
+    const pluginResponse = await fetch(new URL('/desktop-smoke', hostUrl), { headers: { cookie } })
     if (await pluginResponse.text() !== 'plugin route ready') throw new Error('desktop runtime: plugin HTTP route failed')
-    const installation = await fetch(new URL('/desktop-smoke-install', ready.url), {
+    const installation = await fetch(new URL('/desktop-smoke-install', hostUrl), {
       headers: { cookie }, signal: AbortSignal.timeout(120_000),
     })
     const installationResult = await installation.text()
-    const installed = await fetch(new URL('/desktop-smoke-installed', ready.url), { headers: { cookie } })
-    if (!installation.ok || !installed.ok || await installed.text() !== 'installed plugin ready') {
+    if (!installation.ok) {
+      throw new Error(`desktop runtime: bundled pnpm plugin installation failed: ${installationResult}`)
+    }
+    const waitForInstalled = async (timeoutMs: number): Promise<Response | undefined> => {
+      const deadline = Date.now() + timeoutMs
+      let latest: Response | undefined
+      while (Date.now() <= deadline) {
+        try {
+          latest = await fetch(new URL('/desktop-smoke-installed', hostUrl), { headers: { cookie } })
+          if (latest.ok) return latest
+          await latest.body?.cancel()
+        } catch {
+          // Host 重启期间监听器可能短暂拒绝连接。
+        }
+        await new Promise(resolve => setTimeout(resolve, 250))
+      }
+      return undefined
+    }
+    let installed = await waitForInstalled(1000)
+    const installationState = JSON.parse(installationResult) as { application?: unknown }
+    if (installed === undefined && installationState.application === 'restart-required') {
+      // 插件安装完成后，Host 可能只允许重启后加载新 bundle。
+      await host.stop()
+      host = createHost()
+      const restarted = await host.start()
+      hostUrl = restarted.url
+      cookie = await authenticate(hostUrl)
+      installed = await waitForInstalled(30_000)
+    }
+    if (installed === undefined || await installed.text() !== 'installed plugin ready') {
       throw new Error(`desktop runtime: bundled pnpm plugin installation failed: ${installationResult}`)
     }
     for (const { extension } of inputs) {
-      const converted = await fetch(new URL(`/desktop-smoke-office/${extension}`, ready.url), {
+      const converted = await fetch(new URL(`/desktop-smoke-office/${extension}`, hostUrl), {
         headers: { cookie }, signal: AbortSignal.timeout(120_000),
       })
       if (!converted.ok) throw new Error(`desktop runtime: ${extension} conversion failed: ${await converted.text()}`)
@@ -176,7 +209,7 @@ export function apply(ctx) {
         throw new Error(`desktop runtime: invalid ${extension} PDF output`)
       }
     }
-    const cliResponse = await fetch(new URL('/desktop-smoke-office-cli', ready.url), {
+    const cliResponse = await fetch(new URL('/desktop-smoke-office-cli', hostUrl), {
       headers: { cookie }, signal: AbortSignal.timeout(120_000),
     })
     if (!cliResponse.ok) throw new Error(`desktop runtime: skill CLI failed: ${await cliResponse.text()}`)

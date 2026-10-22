@@ -34,6 +34,19 @@ export function localMacOSPackageEnvironment(environment = process.env) {
 }
 
 /**
+ * Select local Linux test defaults without reading platform signing configuration.
+ * @param {NodeJS.ProcessEnv} environment Parent environment, retained for build tools and networking.
+ * @returns {NodeJS.ProcessEnv} Unsigned build environment with the standard application identifier and no update policy.
+ */
+export function localLinuxPackageEnvironment(environment = process.env) {
+  return {
+    ...Object.fromEntries(Object.entries(environment).filter(([name]) => !AMBIENT_RELEASE_SETTING.test(name))),
+    DSH_DESKTOP_APP_ID: 'io.github.junikatze.dsh-linux-desktop',
+    DSH_DESKTOP_UNSIGNED: '1',
+  }
+}
+
+/**
  * Read a machine preset when selected, otherwise the target's required dotenv; no ambient release fallback.
  * PACKAGE_TEST_RELEASE_ID overrides the test preset only; blank retains its configured ID.
  * @param {'win32' | 'darwin'} platform Target platform.
@@ -136,6 +149,11 @@ function requireReadableFile(environment, name) {
 export function validateDesktopPackageEnvironment(environment, target, options = {}) {
   resolveDesktopAppId(environment)
   resolveNpmRegistry(environment)
+  if (target.platform === 'linux') {
+    if (options.skipNotarization) throw new Error('desktop package: skipping notarization requires a signed macOS build')
+    if (!options.unsigned) throw new Error('desktop package: linux-x64 is an unsigned local build')
+    return
+  }
   if (target.platform !== 'darwin' || !options.unsigned) resolveDesktopPolicyEnvironment(environment)
   if (target.platform === 'darwin') resolveMacOSPackageSettings(environment)
   else resolveWindowsPackageSettings(environment)

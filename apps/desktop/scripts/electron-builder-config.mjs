@@ -65,7 +65,10 @@ export function createElectronBuilderConfig(
   if (skipNotarization && (unsigned || resolvedPlatform !== 'darwin')) throw new Error('Skipping notarization requires a signed macOS build')
   const packagesMacOS = targetPlatform === 'darwin' || (targetPlatform === undefined && hostPlatform === 'darwin')
   const packagesWindows = resolvedPlatform === 'win32'
-  const policy = packagesMacOS && unsigned ? undefined : resolveDesktopPolicyEnvironment(env)
+  const packagesLinux = resolvedPlatform === 'linux'
+  const protocolName = packagesLinux ? 'DSH Linux Desktop' : 'DeepSeek Harness'
+  const protocolScheme = packagesLinux ? 'dsh-linux' : 'dsh'
+  const policy = packagesLinux || (packagesMacOS && unsigned) ? undefined : resolveDesktopPolicyEnvironment(env)
   if (resolvedPlatform === 'win32') installWindowsDirectoryInstaller()
   const macOSSigning = packagesMacOS && !unsigned ? resolveMacOSSigningEnvironment(env) : undefined
   if (packagesMacOS && !unsigned && !skipNotarization) resolveMacOSNotarizationEnvironment(env)
@@ -95,7 +98,7 @@ export function createElectronBuilderConfig(
   if (windowsSigner !== undefined) {
     installWindowsNsisBootstrapSigner({ sign: windowsSigner })
   }
-  const update = unsigned ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
+  const update = unsigned || packagesLinux ? undefined : resolveDesktopAutoUpdateConfig(env, resolvedPlatform, resolvedArch)
   if (preparedRuntime !== undefined) buildPaths.dsh = preparedRuntime
   // electron-builder merges extraMetadata into the packaged manifest, so a build version here reaches
   // the artifact names, the update feed, and the installed app.getVersion() the updater compares against.
@@ -105,17 +108,23 @@ export function createElectronBuilderConfig(
   const packaged = resolveDesktopBuildCommit(env)
   return {
     appId,
-    protocols: [{ name: 'DeepSeek Harness', schemes: ['dsh'] }],
+    protocols: [{ name: protocolName, schemes: [protocolScheme] }],
     extraMetadata: {
       dshDesktopAppId: appId,
       dshDesktopUpdateChannel: update?.channel ?? 'nightly',
+      ...(packagesLinux ? {
+        desktopName: 'dsh-linux-desktop.desktop',
+        homepage: 'https://github.com/JuniKatze/deepseek-harness-linux-desktop',
+      } : {}),
       ...(policy === undefined ? {} : { dshMandatoryUpdatePolicy: policy }),
       ...buildVersion === productVersion ? {} : { version: buildVersion },
       ...packaged === undefined ? {} : { dshBuildCommit: packaged.commit, dshBuildDirty: packaged.dirty },
     },
-    productName: 'DeepSeek Harness',
+    productName: packagesLinux ? 'DSH Linux Desktop' : 'DeepSeek Harness',
     // Unsigned builds carry their own suffix so a shared file can never pass for a release artifact.
-    artifactName: `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
+    artifactName: packagesLinux
+      ? `dsh-desktop-linux-\${version}-linux-\${arch}${output.suffix}.\${ext}`
+      : `deepseek-harness-\${version}-\${os}-\${arch}${output.suffix}.\${ext}`,
     directories: { output: output.directory },
     asar: true,
     electronDist: buildPaths.electron,
@@ -246,8 +255,41 @@ export function createElectronBuilderConfig(
       target: ['nsis'],
     },
     linux: {
+      executableName: 'dsh-linux-desktop',
       category: 'Development',
-      target: ['AppImage'],
+      // 启动器按标准尺寸目录查找图标；单张 1104x1104 PNG 会落入无法识别的尺寸目录。
+      icon: fileURLToPath(new URL('../resources/linux-icons', import.meta.url)),
+      target: ['deb'],
+      maintainer: 'JuniKatze <183716199+JuniKatze@users.noreply.github.com>',
+      vendor: 'JuniKatze community',
+      synopsis: 'Unofficial DeepSeek Harness desktop application for Debian Linux',
+      description: 'Unofficial community Electron desktop shell for a bundled DeepSeek Harness runtime and external plugins on Debian Linux.',
+      syncDesktopName: true,
+      desktop: {
+        entry: {
+          StartupWMClass: 'dsh-linux-desktop',
+          Keywords: 'ai;agent;coding;developer;',
+        },
+      },
+    },
+    deb: {
+      packageName: 'dsh-desktop-linux',
+      packageCategory: 'devel',
+      priority: 'optional',
+      compression: 'xz',
+      depends: [
+        'libgtk-3-0 | libgtk-3-0t64',
+        'libnotify4 | libnotify4t64',
+        'libnss3',
+        'libxss1',
+        'libxtst6',
+        'xdg-utils',
+        'libatspi2.0-0 | libatspi2.0-0t64',
+        'libuuid1',
+        'libsecret-1-0',
+        'libasound2 | libasound2t64',
+      ],
+      recommends: ['bubblewrap', 'zenity | kdialog'],
     },
     nsis: {
       installerSidebar: join(buildPaths.root, 'installer-ui', 'uninstaller-sidebar.bmp'),
