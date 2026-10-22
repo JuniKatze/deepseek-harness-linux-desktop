@@ -104,6 +104,13 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
      */
     'shell.overlay': { kind: 'list'; scope: 'root' }
     /**
+     * Linux frameless-window caption. The built-in occupant owns the compact
+     * brand, document title, application/edit menu launchers and window
+     * controls. A plugin can replace it without inheriting native Electron
+     * privileges.
+     */
+    'shell.titlebar': { kind: 'single'; scope: 'root' }
+    /**
      * Window-chrome seat at the frame's top-left, over every main panel.
      * Mounted only while the sidebar column is fully hidden (macOS desktop
      * collapse; other platforms keep the rail), so the occupant can assume the
@@ -184,6 +191,7 @@ export function apply(ctx: ClientContext): void {
         'rightbar': { kind: 'single', scope: 'root' },
         'shell.bottom': { kind: 'single', scope: 'root' },
         'shell.overlay': { kind: 'list', scope: 'root' },
+        'shell.titlebar': { kind: 'single', scope: 'root' },
         'shell.leading': { kind: 'single', scope: 'root' },
       },
       store,

@@ -30,7 +30,14 @@ import { installDesktopFileDrag } from './file-drag.ts'
 import { installDesktopDirectoryPicker } from './directory-picker.ts'
 import { installMicrophonePermissions } from './microphone-permissions.ts'
 import { DesktopBackendController } from './backend-controller.ts'
-import { DESKTOP_IPC, SCHEME, assertDesktopSender, type DesktopUpdateState } from './ipc.ts'
+import {
+  DESKTOP_IPC,
+  SCHEME,
+  assertDesktopSender,
+  type DesktopUpdateState,
+  type DesktopWindowControl,
+  type DesktopWindowState,
+} from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
 import { claimDesktopSingleInstance } from './single-instance.ts'
@@ -268,6 +275,10 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     minWidth: 520,
     minHeight: 600,
     show,
+    ...(process.platform === 'linux' && primary ? {
+      frame: false,
+      autoHideMenuBar: true,
+    } : {}),
     ...(process.platform === 'win32' && primary ? {
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
@@ -298,17 +309,24 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
     return { action: 'deny' }
   })
-  if (process.platform === 'darwin' || process.platform === 'win32') {
-    // Fullscreen hides native window controls; overlays drop their caption clearance.
-    const sendFullscreen = (): void => {
-      if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
-    }
-    window.on('enter-full-screen', sendFullscreen)
-    window.on('leave-full-screen', sendFullscreen)
-    // Reloads and navigations re-register the preload listener; resend the
-    // current state so a fullscreen reload does not fall back to windowed CSS.
-    window.webContents.on('did-finish-load', sendFullscreen)
+  // Custom captions mirror both fullscreen and maximized state. Reloads and
+  // navigations re-register the preload listener, so the current state is sent
+  // again after every document load.
+  const windowState = (): DesktopWindowState => ({
+    maximized: window.isMaximized(),
+    fullscreen: window.isFullScreen(),
+  })
+  const sendWindowState = (): void => {
+    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowState, windowState())
   }
+  const sendFullscreen = (): void => {
+    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
+  }
+  window.on('maximize', sendWindowState)
+  window.on('unmaximize', sendWindowState)
+  window.on('enter-full-screen', () => { sendWindowState(); sendFullscreen() })
+  window.on('leave-full-screen', () => { sendWindowState(); sendFullscreen() })
+  window.webContents.on('did-finish-load', () => { sendWindowState(); sendFullscreen() })
   if (process.platform === 'darwin') {
     // Deminiaturize reattaches the NSVisualEffectView material late
     // (electron/electron#25368), so a transparent window shows the desktop
@@ -833,6 +851,28 @@ async function main(): Promise<void> {
       || !event.senderFrame.url.startsWith('dsh-app://app/')) throw new Error('Rejected Platform command')
     return owner
   }
+  ipcMain.handle(DESKTOP_IPC.windowControl, (event, action: unknown) => {
+    const window = assertMainApplication(event)
+    if (action !== 'minimize' && action !== 'toggle-maximize' && action !== 'close') {
+      throw new Error('desktop window: invalid control')
+    }
+    switch (action satisfies DesktopWindowControl) {
+      case 'minimize':
+        window.minimize()
+        break
+      case 'toggle-maximize':
+        if (window.isMaximized()) window.unmaximize()
+        else window.maximize()
+        break
+      case 'close':
+        window.close()
+        break
+    }
+  })
+  ipcMain.handle(DESKTOP_IPC.windowState, (event): DesktopWindowState => {
+    const window = assertMainApplication(event)
+    return { maximized: window.isMaximized(), fullscreen: window.isFullScreen() }
+  })
   ipcMain.on(PLATFORM_IPC.bootstrap, (event) => {
     try { event.returnValue = platformView.bootstrap(event) }
     catch { event.returnValue = null }
@@ -1088,10 +1128,14 @@ async function main(): Promise<void> {
     { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
   ]
   const refreshApplicationMenu = (): void => {
-    Menu.setApplicationMenu(Menu.buildFromTemplate(process.platform === 'win32' ? devToolsItems : [{
-      label: darwin ? app.name : currentDesktopLocale().messages.application,
-      submenu: [...applicationItems(), ...devToolsItems],
-    }, ...platformMenus()]))
+    // Linux owns a frameless caption. Its menu entries are opened as anchored
+    // native popups by the Web shell, so no persistent menu bar is installed.
+    Menu.setApplicationMenu(process.platform === 'linux' ? null : Menu.buildFromTemplate(
+      process.platform === 'win32' ? devToolsItems : [{
+        label: darwin ? app.name : currentDesktopLocale().messages.application,
+        submenu: [...applicationItems(), ...devToolsItems],
+      }, ...platformMenus()],
+    ))
     tray?.relabel()
   }
   refreshApplicationMenu()
@@ -1120,7 +1164,7 @@ async function main(): Promise<void> {
     ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
   })
 
-  if (process.platform === 'win32') {
+  if (process.platform === 'win32' || process.platform === 'linux') {
     ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
       assertDesktopSender(event, ['app'])
       if (mainWindow === undefined || event.sender !== mainWindow.webContents

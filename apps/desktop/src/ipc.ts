@@ -34,9 +34,20 @@ export const DESKTOP_IPC = {
   updatesPresentation: 'dsh-desktop:updates-presentation',
   nativeThemeSet: 'dsh-desktop:native-theme-set',
   windowFullscreen: 'dsh-desktop:window-fullscreen',
+  windowState: 'dsh-desktop:window-state',
+  windowControl: 'dsh-desktop:window-control',
   windowsAppearance: 'dsh-desktop:windows-appearance',
   windowsMenu: 'dsh-desktop:windows-menu',
 } as const
+
+/** Window commands accepted from the main application document. */
+export type DesktopWindowControl = 'minimize' | 'toggle-maximize' | 'close'
+
+/** Display state needed by the frameless Linux caption. */
+export interface DesktopWindowState {
+  readonly maximized: boolean
+  readonly fullscreen: boolean
+}
 
 /** Desktop release update state rendered by desktop-owned UI. */
 export type DesktopUpdatePreparationFailureKind = 'stop-failed' | 'tasks-changed' | 'tasks-unavailable' | 'fullscreen-timeout'
@@ -81,6 +92,12 @@ export interface DshDesktopProductApi {
   readonly fileDrag: DesktopFileDrag
   readonly keyboard: DesktopKeyboardApi
   readonly shortcuts: DesktopShortcutsApi
+  readonly window: {
+    control(action: DesktopWindowControl): Promise<void>
+    state(): Promise<DesktopWindowState>
+    openMenu(name: 'application' | 'edit', x: number, y: number): Promise<void>
+    subscribe(listener: (state: DesktopWindowState) => void): () => void
+  }
   /**
    * Local machine description for the feedback questionnaire.
    * @returns `name=value` fields separated by `; `, with no hostname, user name, or serial number.

@@ -45,6 +45,27 @@
   -webkit-app-region: drag;
 }
 
+/* Linux uses a frameless native window and a renderer-owned caption. The
+   frame reserves its height and the caption spans both sidebar and content. */
+:global([data-linux-titlebar]) .frame {
+  box-sizing: border-box;
+  padding-top: var(--dsh-linux-titlebar-height, 40px);
+}
+
+:global(html[data-linux-titlebar][data-fullscreen]) .frame {
+  padding-top: 0;
+}
+
+.titlebarSlot {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--dsh-linux-titlebar-height, 40px);
+}
+
+:global(html[data-linux-titlebar][data-fullscreen]) .titlebarSlot {
+  display: none;
+}
+
 :global([data-windows-titlebar]) .sidebarCol {
   border-right: none;
 }

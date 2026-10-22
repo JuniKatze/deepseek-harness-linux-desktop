@@ -38,6 +38,28 @@ it('exposes onboarding size activation to the application document', async () =>
   expect(electron.ipcRenderer.send.mock.calls).toEqual([[DESKTOP_IPC.onboardingActive, true], [DESKTOP_IPC.onboardingActive, false]])
 })
 
+it('exposes only caption window commands, state and menus to the application document', async () => {
+  vi.stubGlobal('location', new URL('dsh-app://app/'))
+  await import('../src/preload-app.ts')
+  const api = electron.contextBridge.exposeInMainWorld.mock.calls.find(([name]) => name === 'dshDesktop')?.[1] as DshDesktopProductApi
+  await api.window.control('minimize')
+  await api.window.state()
+  await api.window.openMenu('application', 12, 40)
+  expect(electron.ipcRenderer.invoke.mock.calls).toEqual([
+    [DESKTOP_IPC.windowControl, 'minimize'],
+    [DESKTOP_IPC.windowState],
+    [DESKTOP_IPC.windowsMenu, 'application', 12, 40],
+  ])
+  const listener = vi.fn()
+  const dispose = api.window.subscribe(listener)
+  const handler = electron.ipcRenderer.on.mock.calls.find(([channel]) => channel === DESKTOP_IPC.windowState)?.[1] as
+    (event: unknown, state: unknown) => void
+  handler({}, { maximized: true, fullscreen: false })
+  expect(listener).toHaveBeenCalledWith({ maximized: true, fullscreen: false })
+  dispose()
+  expect(electron.ipcRenderer.off).toHaveBeenCalledWith(DESKTOP_IPC.windowState, handler)
+})
+
 it('limits product documents to update status and a native confirmation action', async () => {
   vi.stubGlobal('location', new URL('dsh-app://app/index.html'))
   await import('../src/preload-app.ts')

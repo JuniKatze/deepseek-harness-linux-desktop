@@ -1,0 +1,133 @@
+.titlebar {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 1100;
+  box-sizing: border-box;
+  height: var(--dsh-linux-titlebar-height, 40px);
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  color: var(--dsw-alias-label-primary);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--dsw-specific-sidebar-fill) 94%, var(--dsw-alias-state-business-primary)), transparent 42%),
+    var(--dsw-alias-bg-base);
+  border-bottom: 1px solid var(--dsw-alias-border-l3);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar[data-maximized] {
+  border-bottom-color: var(--dsw-alias-border-l2);
+}
+
+.identity {
+  min-width: 0;
+  height: calc(var(--dsh-linux-titlebar-height, 40px) - 8px);
+  align-self: center;
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 2px;
+}
+
+.title {
+  max-width: min(32vw, 360px);
+  height: 100%;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 8px;
+  overflow: hidden;
+  color: var(--dsw-alias-label-secondary);
+  font: 500 12px/1.45 var(--dsw-font-family);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menuBar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0 6px 0 4px;
+  -webkit-app-region: no-drag;
+}
+
+.menuButton,
+.windowControls button {
+  width: 32px;
+  height: calc(var(--dsh-linux-titlebar-height, 40px) - 8px);
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  color: var(--dsw-alias-label-secondary);
+  background: transparent;
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+
+.menuButton svg,
+.windowControls svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.menuButton:hover,
+.menuButton[aria-expanded='true'] {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.menuButton:focus-visible,
+.windowControls button:focus-visible {
+  outline: 2px solid var(--dsw-alias-state-business-primary);
+  outline-offset: -2px;
+}
+
+.dragSpace {
+  min-width: 18px;
+  flex: 1;
+}
+
+.windowControls {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  padding: 0 4px;
+  -webkit-app-region: no-drag;
+}
+
+.windowControls button {
+  width: 38px;
+  border-radius: 6px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.windowControls button:hover {
+  color: var(--dsw-alias-label-primary);
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.windowControls button[data-control='close']:hover {
+  color: #fff;
+  background: #d93b45;
+}
+
+@media (max-width: 700px) {
+  .title {
+    max-width: 34vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menuButton,
+  .windowControls button {
+    transition: none;
+  }
+}

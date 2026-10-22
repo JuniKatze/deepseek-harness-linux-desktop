@@ -3,7 +3,7 @@
 import type { GlobalStandardProps, RenderOpts } from '@deepseek-ai/dsh-client-ui-slots'
 import { allowAllAccess, bindSnapshotSelector } from '@deepseek-ai/dsh-client-test-runtime'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, cleanup, render } from '@testing-library/react'
+import { act, cleanup, fireEvent, render } from '@testing-library/react'
 import { AppFrame } from '../src/client/AppFrame.tsx'
 import type { AppFrameProps } from '../src/client/AppFrame.tsx'
 import type { MainPanelId, RightbarOwnerProps, SidebarOwnerProps } from '../src/client/index.ts'
@@ -66,6 +66,7 @@ function mountFrame(windowWidth = frameWidth) {
   const slotCalls: { key: string; props: object; options: RenderOpts | undefined }[] = []
   const renderSlot: AppFrameProps['renderSlot'] = (key, owner, options) => {
     slotCalls.push({ key, props: owner, options })
+    if (key === 'shell.titlebar' && options?.fallback !== undefined) return options.fallback
     return <div data-testid={`${key}-content`} data-entry-key={options?.entryKey} />
   }
   const useSessions: AppFrameProps['useSessions'] = sel => sel({
@@ -240,6 +241,34 @@ describe('AppFrame', () => {
       expect(queryByTestId('shell.leading-content')).toBeNull()
     } finally {
       document.documentElement.removeAttribute('data-windows-titlebar')
+    }
+  })
+
+  it('renders the Linux caption and routes its controls through the desktop bridge', async () => {
+    const control = vi.fn(async () => {})
+    const subscribe = vi.fn(() => () => {})
+    vi.stubGlobal('dshDesktop', {
+      window: {
+        control,
+        state: async () => ({ maximized: false, fullscreen: false }),
+        openMenu: vi.fn(async () => {}),
+        subscribe,
+      },
+    })
+    document.documentElement.setAttribute('data-linux-titlebar', '')
+    try {
+      const { container } = mountFrame()
+      const titlebar = container.querySelector<HTMLElement>('[data-desktop-titlebar]')
+      expect(titlebar).not.toBeNull()
+      expect(titlebar!.firstElementChild?.getAttribute('role')).toBe('menubar')
+      expect(titlebar!.children[1]?.textContent).toBe('DSH Local Build')
+      expect(titlebar!.querySelector('[data-menu="application"]')).not.toBeNull()
+      expect(titlebar!.querySelector('[data-menu="edit"]')).not.toBeNull()
+      fireEvent.click(titlebar!.querySelector('[data-control="minimize"]')!)
+      expect(control).toHaveBeenCalledWith('minimize')
+      expect(subscribe).toHaveBeenCalledOnce()
+    } finally {
+      document.documentElement.removeAttribute('data-linux-titlebar')
     }
   })
 

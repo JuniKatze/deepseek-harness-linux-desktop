@@ -115,6 +115,11 @@ const harness = await vi.hoisted(async () => {
     fullscreen = false
     isFullScreen() { return this.fullscreen }
     readonly setFullScreen = vi.fn((flag: boolean) => { this.fullscreen = flag; this.emit(flag ? 'enter-full-screen' : 'leave-full-screen') })
+    maximized = false
+    isMaximized() { return this.maximized }
+    readonly maximize = vi.fn(() => { this.maximized = true; this.emit('maximize') })
+    readonly unmaximize = vi.fn(() => { this.maximized = false; this.emit('unmaximize') })
+    readonly minimize = vi.fn(() => { this.minimized = true; this.emit('minimize') })
     minimized = false
     isMinimized() { return this.minimized }
     visible = true
@@ -852,7 +857,7 @@ describe('desktop main startup', () => {
     }
   })
 
-  it.each(['darwin', 'win32', 'linux'] as const)('limits native titlebar styling to macOS on %s', async (platform) => {
+  it.each(['darwin', 'win32', 'linux'] as const)('selects custom window chrome on %s', async (platform) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
     await import('../src/main.ts')
     await harness.preparing.promise
@@ -868,8 +873,10 @@ describe('desktop main startup', () => {
         { role: 'toggleDevTools', visible: false, accelerator: 'F12' },
       ])
     } else {
+      expect(window.options).toMatchObject({ frame: false, autoHideMenuBar: true })
       expect(window.options).not.toHaveProperty('titleBarStyle')
       expect(window.options).not.toHaveProperty('vibrancy')
+      expect(harness.menu.setApplicationMenu).toHaveBeenCalledWith(null)
     }
     expect(harness.hosts).toHaveLength(0)
   })
@@ -886,7 +893,7 @@ describe('desktop main startup', () => {
     expect((await handler(new Request('dsh-app://foreign/index.html'))).status).toBe(404)
   })
 
-  it.each(['darwin', 'win32'] as const)('relays the %s fullscreen state on transitions and after each load', async (platform) => {
+  it.each(['darwin', 'win32', 'linux'] as const)('relays the %s fullscreen state on transitions and after each load', async (platform) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
     await import('../src/main.ts')
     await harness.preparing.promise
@@ -907,16 +914,6 @@ describe('desktop main startup', () => {
     window.destroyed = true
     window.emit('enter-full-screen')
     expect(sent()).toHaveLength(relayed)
-  })
-
-  it.each(['linux'] as const)('registers no fullscreen relay on %s', async (platform) => {
-    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
-    await import('../src/main.ts')
-    await harness.preparing.promise
-    const window = harness.windows[0]!
-    window.emit('enter-full-screen')
-    window.webContents.emit('did-finish-load')
-    expect(window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)).toHaveLength(0)
   })
 
   it('covers the macOS vibrancy reattach gap with an opaque base while minimized or hidden', async () => {
@@ -1052,7 +1049,30 @@ describe('desktop main startup', () => {
     await edit
   })
 
-  it.each(['darwin', 'linux'] as const)('adds the product File menu and standard window commands only on macOS (%s)', async (platform) => {
+  it('exposes Linux caption menu and window controls only to the owned application frame', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
+    expect(harness.handlers.has(DESKTOP_IPC.windowsMenu)).toBe(true)
+    expect(harness.handlers.has(DESKTOP_IPC.windowControl)).toBe(true)
+    expect(harness.handlers.has(DESKTOP_IPC.windowState)).toBe(true)
+    expect(harness.handlers.get(DESKTOP_IPC.windowState)!(event)).toEqual({ maximized: false, fullscreen: false })
+    await harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'toggle-maximize')
+    expect(window.maximize).toHaveBeenCalledOnce()
+    window.webContents.send.mockClear()
+    window.webContents.emit('did-finish-load')
+    expect(window.webContents.send).toHaveBeenCalledWith(DESKTOP_IPC.windowState, { maximized: true, fullscreen: false })
+    await harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'toggle-maximize')
+    expect(window.unmaximize).toHaveBeenCalledOnce()
+    await harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'minimize')
+    expect(window.minimize).toHaveBeenCalledOnce()
+    expect(() => harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'invalid')).toThrow('invalid control')
+    expect(() => harness.handlers.get(DESKTOP_IPC.windowState)!({ ...event, sender: {} })).toThrow('Rejected Platform command')
+  })
+
+  it.each(['darwin'] as const)('adds the product File menu and standard window commands only on macOS (%s)', async (platform) => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
     await import('../src/main.ts')
     await harness.preparing.promise
