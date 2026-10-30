@@ -32,12 +32,6 @@ function desktopWindowBridge(): DesktopWindowBridge | undefined {
   }).dshDesktop?.window
 }
 
-/** Read the current document title without the desktop product suffix. */
-function documentTitle(): string {
-  const value = document.title.replace(/\s+[—-]\s+DeepSeek Harness$/u, '').trim()
-  return value === '' ? 'DeepSeek Harness' : value
-}
-
 function MinimizeIcon() {
   return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5h9" /></svg>
 }
@@ -62,7 +56,6 @@ function CloseIcon() {
 export function DesktopTitlebar({ t }: DesktopTitlebarProps) {
   const bridge = desktopWindowBridge()
   const [state, setState] = useState<DesktopWindowState>({ maximized: false, fullscreen: false })
-  const [title, setTitle] = useState(() => documentTitle())
   const [openMenu, setOpenMenu] = useState<'application' | 'edit' | undefined>()
 
   useEffect(() => {
@@ -77,14 +70,6 @@ export function DesktopTitlebar({ t }: DesktopTitlebarProps) {
       dispose()
     }
   }, [bridge])
-
-  useEffect(() => {
-    const update = (): void => { setTitle(documentTitle()) }
-    const observer = new MutationObserver(update)
-    observer.observe(document.head, { childList: true, subtree: true, characterData: true })
-    update()
-    return () => { observer.disconnect() }
-  }, [])
 
   if (bridge === undefined) return null
 
@@ -136,9 +121,6 @@ export function DesktopTitlebar({ t }: DesktopTitlebarProps) {
         >
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 10.8-.5 2.2 2.2-.5 6.6-6.6-1.7-1.7zM9.4 5l1.7 1.7" /></svg>
         </button>
-      </div>
-      <div className={css.identity}>
-        <span className={css.title} title={title}>{title}</span>
       </div>
       <div className={css.dragSpace} aria-hidden="true" />
       <div className={css.windowControls}>

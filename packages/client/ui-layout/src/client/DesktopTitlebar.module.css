@@ -20,29 +20,6 @@
   border-bottom-color: var(--dsw-alias-border-l2);
 }
 
-.identity {
-  min-width: 0;
-  height: calc(var(--dsh-linux-titlebar-height, 40px) - 8px);
-  align-self: center;
-  display: flex;
-  align-items: center;
-  padding: 0 8px 0 2px;
-}
-
-.title {
-  max-width: min(32vw, 360px);
-  height: 100%;
-  display: flex;
-  align-items: center;
-  box-sizing: border-box;
-  padding: 0 8px;
-  overflow: hidden;
-  color: var(--dsw-alias-label-secondary);
-  font: 500 12px/1.45 var(--dsw-font-family);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .menuBar {
   display: flex;
   align-items: center;
@@ -117,12 +94,6 @@
 .windowControls button[data-control='close']:hover {
   color: #fff;
   background: #d93b45;
-}
-
-@media (max-width: 700px) {
-  .title {
-    max-width: 34vw;
-  }
 }
 
 @media (prefers-reduced-motion: reduce) {

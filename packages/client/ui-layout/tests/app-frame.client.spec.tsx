@@ -261,7 +261,7 @@ describe('AppFrame', () => {
       const titlebar = container.querySelector<HTMLElement>('[data-desktop-titlebar]')
       expect(titlebar).not.toBeNull()
       expect(titlebar!.firstElementChild?.getAttribute('role')).toBe('menubar')
-      expect(titlebar!.children[1]?.textContent).toBe('DSH Local Build')
+      expect(titlebar!.textContent).toBe('')
       expect(titlebar!.querySelector('[data-menu="application"]')).not.toBeNull()
       expect(titlebar!.querySelector('[data-menu="edit"]')).not.toBeNull()
       fireEvent.click(titlebar!.querySelector('[data-control="minimize"]')!)
