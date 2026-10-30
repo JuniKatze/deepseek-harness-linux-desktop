@@ -1,11 +1,11 @@
-/** Windows system tray: the always-present way back to a hidden window and the explicit quit entry. */
+/** Windows 与 Linux 常驻托盘，提供恢复隐藏窗口和显式退出的入口。 */
 
 import { Menu, nativeImage, Tray } from 'electron'
 import type { DesktopLocale } from './locale.ts'
 
 /** Main-process actions the tray triggers; both run the same paths as the window and application menu. */
 export interface DesktopTrayOptions {
-  /** Multi-size ICO rendered by `scripts/render-tray-icon.ts`; Windows picks the bitmap for the display scale. */
+  /** Windows 使用多尺寸 ICO；Linux 使用随包的 PNG 图标。 */
   readonly iconPath: string
   readonly locale: () => DesktopLocale
   /** Show and focus the primary window. */

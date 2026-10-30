@@ -138,6 +138,9 @@ describe('installer preparation preserves application dependencies', () => {
       packageName: 'dsh-desktop-linux',
       compression: 'xz',
     })
+    const trayIcon = config.extraResources.find(resource => resource.to === 'tray.png')
+    expect(trayIcon).toBeDefined()
+    expect(readFileSync(trayIcon!.from)).toEqual(readFileSync(new URL('../resources/linux-icons/48x48.png', import.meta.url)))
     expect(config.productName).toBe('DSH Linux Desktop')
     expect(config.protocols).toEqual([{ name: 'DSH Linux Desktop', schemes: ['dsh-linux'] }])
     expect(config.extraMetadata).toMatchObject({

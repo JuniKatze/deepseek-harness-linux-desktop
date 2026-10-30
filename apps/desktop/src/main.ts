@@ -1139,8 +1139,10 @@ async function main(): Promise<void> {
     tray?.relabel()
   }
   refreshApplicationMenu()
-  const trayIconPath = development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
-  if (process.platform === 'win32') {
+  const trayIconPath = process.platform === 'linux'
+    ? development ? join(app.getAppPath(), 'resources', 'linux-icons', '48x48.png') : join(process.resourcesPath, 'tray.png')
+    : development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
+  if (process.platform === 'win32' || process.platform === 'linux') {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
@@ -1228,8 +1230,8 @@ async function main(): Promise<void> {
     window.on('close', (event) => {
       if (quitting || shellInstallerOwnsQuit || sessionEnding) return
       event.preventDefault()
-      if (process.platform === 'linux') {
-        // Linux has no always-present tray in this local build, so closing follows the ordinary quit path.
+      if (process.platform === 'linux' && tray === undefined) {
+        // 托盘创建失败时走普通退出确认，避免窗口隐藏后失去恢复入口。
         app.quit()
         return
       }

@@ -1333,28 +1333,81 @@ describe('desktop main startup', () => {
     expect(harness.trays[0]!.destroy).toHaveBeenCalledOnce()
   })
 
-  it('routes closing through the tray confirmation and keeps the Host running', async () => {
+  it.each(['win32', 'linux'] as const)('hides to the tray and keeps the Host running on %s', async (platform) => {
+    vi.stubGlobal('process', { ...process, platform })
     const host = await readyWorkspace()
     const window = harness.windows[0]!
     expect(harness.trays).toHaveLength(1)
-    expect(harness.trays[0]!.image).toEqual({ path: join('desktop-test-resources', 'tray.ico') })
-    expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
+    expect(harness.trays[0]!.image).toEqual({ path: join('desktop-test-resources', platform === 'linux' ? 'tray.png' : 'tray.ico') })
+    if (platform === 'win32') {
+      expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
+    }
     window.show.mockClear()
     window.close()
     expect(window.isDestroyed()).toBe(false)
     expect(window.hide).toHaveBeenCalledOnce()
     expect(host.stop).not.toHaveBeenCalled()
     expect(harness.app.quit).not.toHaveBeenCalled()
-    expect(harness.backgroundNotice.close).toHaveBeenCalledOnce()
+    expect(harness.backgroundNotice.close).toHaveBeenCalledTimes(platform === 'win32' ? 1 : 0)
+    expect(host.inspectQuit).not.toHaveBeenCalled()
+    const urls = [...window.urls]
     harness.trays[0]!.emit('click')
     expect(window.show).toHaveBeenCalledOnce()
     expect(window.focus).toHaveBeenCalled()
     harness.app.emit('second-instance')
     expect(window.show).toHaveBeenCalledTimes(2)
+    expect(window.urls).toEqual(urls)
+    expect(harness.hosts).toHaveLength(1)
     // Locale changes relabel the tray together with the application menu.
     const relabels = harness.trays[0]!.setContextMenu.mock.calls.length
     harness.ipcOn.mock.calls.find(call => call[0] === DESKTOP_IPC.localeChanged)![1]({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'zh')
     expect(harness.trays[0]!.setContextMenu.mock.calls.length).toBe(relabels + 1)
+  })
+
+  it.each(['en-US', 'zh-CN'])('confirms a Linux tray quit without interrupting tasks when cancelled (%s)', async (language) => {
+    vi.stubGlobal('process', { ...process, platform: 'linux' })
+    vi.spyOn(harness.app, 'getPreferredSystemLanguages').mockReturnValue([language])
+    const host = await readyWorkspace()
+    host.inspectQuit.mockResolvedValue({ activeTasks: true, scheduledTasks: true })
+    const messages = language === 'zh-CN' ? zh : en
+    const menu = harness.menu.mock.calls.map(([items]) => items).find(items => items[0]?.label === messages.openApplication)!
+    const quit = menu.find(item => item.label === messages.quitApplication)!
+    harness.windows[0]!.close()
+    ;(quit as { click: () => void }).click()
+    await vi.advanceTimersByTimeAsync(0)
+    const { message, detail, buttons } = harness.dialog.showMessageBox.mock.lastCall![0] as MessageBoxOptions
+    await expect(JSON.stringify({ menu: menu.map(item => item.label ?? item.type), message, detail, buttons }, null, 2) + '\n')
+      .toMatchFileSnapshot(`./expected/tray-linux-${language}.json`)
+    expect(host.stop).not.toHaveBeenCalled()
+    expect(harness.trays[0]!.destroy).not.toHaveBeenCalled()
+    harness.dialog.showMessageBox.mockResolvedValue({ response: 0, checkboxChecked: false })
+    ;(quit as { click: () => void }).click()
+    await vi.advanceTimersByTimeAsync(0)
+    await host.stopping.promise
+    host.exited.resolve()
+    await harness.quitCompleted.promise
+    expect(harness.trays[0]!.destroy).toHaveBeenCalledOnce()
+  })
+
+  it('uses ordinary quit confirmation if the Linux tray cannot be created', async () => {
+    vi.stubGlobal('process', { ...process, platform: 'linux' })
+    const { nativeImage } = await import('electron')
+    const createFromPath = nativeImage.createFromPath.bind(nativeImage)
+    vi.spyOn(nativeImage, 'createFromPath').mockImplementation((path) => {
+      if (path.endsWith('tray.png')) throw new Error('tray unavailable')
+      return createFromPath(path)
+    })
+    const host = await readyWorkspace()
+    host.inspectQuit.mockResolvedValue({ activeTasks: true, scheduledTasks: false })
+    const window = harness.windows[0]!
+    window.close()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(harness.trays).toHaveLength(0)
+    expect(window.hide).not.toHaveBeenCalled()
+    expect(window.isDestroyed()).toBe(false)
+    expect(host.stop).not.toHaveBeenCalled()
+    expect(harness.dialog.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({ detail: en.quitActiveTasks }))
+    host.inspectQuit.mockResolvedValue({ activeTasks: false, scheduledTasks: false })
   })
 
   it('hides a macOS owner with a mandatory view without quitting or stopping the Host', async () => {

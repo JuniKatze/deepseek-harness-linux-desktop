@@ -1,0 +1,13 @@
+{
+  "menu": [
+    "Open DeepSeek Harness",
+    "separator",
+    "Quit DeepSeek Harness"
+  ],
+  "message": "Quit DeepSeek Harness?",
+  "detail": "Running tasks will be interrupted, and scheduled tasks will not run while the app is closed.",
+  "buttons": [
+    "Quit",
+    "Cancel"
+  ]
+}
