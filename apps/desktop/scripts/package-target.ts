@@ -521,7 +521,8 @@ export async function packageTarget(
         { cwd: APP_ROOT, env: electronBuilderEnv, timeoutMs: 60_000 })
     })
   }
-  await execute(invocation.unsigned ? ['run', 'build', '--profile', 'local'] : ['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
+  const localBrand = invocation.unsigned && target.platform !== 'linux'
+  await execute(localBrand ? ['run', 'build', '--profile', 'local'] : ['run', 'build:official'], buildEnv, REPOSITORY_ROOT)
   let preparationFailure: { error: unknown } | undefined
   const executePreparation = async (args: readonly string[], env: NodeJS.ProcessEnv, cwd?: string): Promise<void> => {
     if (preparationFailure !== undefined) throw preparationFailure.error
@@ -531,7 +532,7 @@ export async function packageTarget(
   const pack = async (): Promise<void> => {
     await executePreparation([
       ...(invocation.unsigned
-        ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts']
+        ? ['exec', 'tsx', 'apps/desktop/scripts/pack-local-packages.ts', ...(target.platform === 'linux' ? ['--profile', 'official'] : [])]
         : ['run', 'release:pack', '--family', 'dsh']),
       '--out', buildPaths.packedDsh, ...packArguments,
     ], buildEnv, REPOSITORY_ROOT)

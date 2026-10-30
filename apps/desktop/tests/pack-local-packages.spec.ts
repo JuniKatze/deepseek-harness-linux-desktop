@@ -82,6 +82,23 @@ it('packs local client artifacts without a release publication record', async ()
   expect(existsSync(join(root, 'packed', PUBLISH_ORDER_FILE))).toBe(false)
 }, testTimeout)
 
+it('packs upstream-branded artifacts when explicitly selected without claiming a release', async () => {
+  const root = fixture('official')
+  const result = await pack(root, false, ['--profile', 'official'])
+  expect(result.code, result.output).toBe(0)
+  expect(readdirSync(join(root, 'packed'))).toEqual(['deepseek-ai-dsh-probe-1.2.3.tgz'])
+  expect(existsSync(join(root, 'packed', PUBLISH_ORDER_FILE))).toBe(false)
+}, testTimeout)
+
+it.each(['official', 'invalid'])('rejects mismatched or invalid profile %s before replacing packages', async (profile) => {
+  const root = fixture()
+  write(root, 'packed/retained.txt', 'previous output\n')
+  const result = await pack(root, false, ['--profile', profile])
+  expect(result.code).not.toBe(0)
+  expect(result.output).toMatch(profile === 'official' ? /DSH_CLIENT_BUILD_PROFILE/ : /unknown client build profile/)
+  expect(readFileSync(join(root, 'packed/retained.txt'), 'utf8')).toBe('previous output\n')
+}, testTimeout)
+
 it.each(['official', 'stale', 'missing'] as const)('rejects %s client artifacts before replacing local packages', async (kind) => {
   const root = fixture(kind === 'official' ? 'official' : 'local')
   if (kind === 'stale') write(root, 'packages/client/probe/lib/client.js', 'export const changed = true\n')
