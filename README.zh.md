@@ -3,6 +3,7 @@
 [English](README.md) | 中文
 
 > [!IMPORTANT]
+>
 > 本分叉提供由 [`JuniKatze/deepseek-harness-linux-desktop`](https://github.com/JuniKatze/deepseek-harness-linux-desktop) 维护的**非官方 Debian 桌面社区构建**，并非 DeepSeek 官方发行。安装方式、包身份、支持范围和已知限制见[Linux 桌面社区构建](COMMUNITY-LINUX.md)。
 
 DeepSeek Harness（`dsh`）是由 [DeepSeek AI](https://deepseek.com) 开发的开源 agent harness（智能体框架）。
