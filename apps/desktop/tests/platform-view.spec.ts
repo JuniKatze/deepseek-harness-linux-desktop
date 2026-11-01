@@ -94,6 +94,20 @@ it('bootstraps only the owned main frame and never puts the token in a URL', asy
   manager.close()
 })
 
+it('follows workspace navigation rather than the separate shell document', async () => {
+  const { manager, owner } = setup()
+  const workspace = new EventEmitter()
+  await manager.open(owner, 'usage', bounds, workspace)
+  const active = view().webContents
+  owner.webContents.emit('did-start-navigation', {}, 'dsh-app://shell/titlebar.html', false, true)
+  expect(active.close).not.toHaveBeenCalled()
+  workspace.emit('did-start-navigation', {}, 'dsh-app://app/', false, true)
+  expect(active.close).toHaveBeenCalledOnce()
+  expect(workspace.listenerCount('did-start-navigation')).toBe(0)
+  expect(workspace.listenerCount('render-process-gone')).toBe(0)
+  expect(workspace.listenerCount('destroyed')).toBe(0)
+})
+
 it('destroys old documents on sign-out or credential replacement', async () => {
   const { manager, owner } = setup()
   await manager.open(owner, 'usage', bounds)

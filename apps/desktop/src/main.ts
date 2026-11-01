@@ -21,6 +21,7 @@ import {
   shell,
   type IpcMainInvokeEvent,
   type MenuItemConstructorOptions,
+  type WebContents,
 } from 'electron'
 import { resolveDesktopPaths } from './paths.ts'
 import { DesktopProjectManager } from './project-manager.ts'
@@ -35,8 +36,6 @@ import {
   SCHEME,
   assertDesktopSender,
   type DesktopUpdateState,
-  type DesktopWindowControl,
-  type DesktopWindowState,
 } from './ipc.ts'
 import { readDeviceInfo } from './device-info.ts'
 import { desktopUpdateReadyConfirmation, formatDesktopMessage, resolveDesktopLocale, resolveDesktopStartupLocale } from './locale.ts'
@@ -74,6 +73,8 @@ import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
 import { desktopOpenProtocol, desktopOpenUrl, desktopUserDataDirectory } from './desktop-identity.ts'
+import { LinuxDesktopFrame, LINUX_TITLEBAR_URL } from './linux-frame.ts'
+import { TITLEBAR_IPC, type DesktopTitlebarView } from './titlebar-api.ts'
 
 let focusPrimaryWindow = (): void => {}
 let stopForRecovery = async (): Promise<void> => { await stopOperationReports() }
@@ -301,32 +302,11 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       contextIsolation: true,
       sandbox: true,
       webSecurity: true,
-      webviewTag: primary,
+      webviewTag: primary && process.platform !== 'linux',
       devTools: true,
     },
   })
-  window.webContents.setWindowOpenHandler(({ url }) => {
-    if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
-    return { action: 'deny' }
-  })
-  // Custom captions mirror both fullscreen and maximized state. Reloads and
-  // navigations re-register the preload listener, so the current state is sent
-  // again after every document load.
-  const windowState = (): DesktopWindowState => ({
-    maximized: window.isMaximized(),
-    fullscreen: window.isFullScreen(),
-  })
-  const sendWindowState = (): void => {
-    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowState, windowState())
-  }
-  const sendFullscreen = (): void => {
-    if (!window.isDestroyed()) window.webContents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
-  }
-  window.on('maximize', sendWindowState)
-  window.on('unmaximize', sendWindowState)
-  window.on('enter-full-screen', () => { sendWindowState(); sendFullscreen() })
-  window.on('leave-full-screen', () => { sendWindowState(); sendFullscreen() })
-  window.webContents.on('did-finish-load', () => { sendWindowState(); sendFullscreen() })
+  if (process.platform !== 'linux' || !primary) configureProductContents(window, window.webContents)
   if (process.platform === 'darwin') {
     // Deminiaturize reattaches the NSVisualEffectView material late
     // (electron/electron#25368), so a transparent window shows the desktop
@@ -349,7 +329,25 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     window.on('restore', applyBackdrop)
     window.on('show', applyBackdrop)
   }
-  window.webContents.on('context-menu', (_event, { isEditable, selectionText, editFlags }) => {
+  return window
+}
+
+function configureProductContents(window: BrowserWindow, contents: WebContents): void {
+  contents.setWindowOpenHandler(({ url }) => {
+    if (['http:', 'https:'].includes(new URL(url).protocol)) void shell.openExternal(url)
+    return { action: 'deny' }
+  })
+  const sendFullscreen = (): void => {
+    if (!window.isDestroyed()) contents.send(DESKTOP_IPC.windowFullscreen, window.isFullScreen())
+  }
+  window.on('enter-full-screen', sendFullscreen)
+  window.on('leave-full-screen', sendFullscreen)
+  contents.on('did-finish-load', sendFullscreen)
+  contents.once('destroyed', () => {
+    window.off('enter-full-screen', sendFullscreen)
+    window.off('leave-full-screen', sendFullscreen)
+  })
+  contents.on('context-menu', (_event, { isEditable, selectionText, editFlags }) => {
     const items: MenuItemConstructorOptions[] = []
     if (isEditable) {
       items.push(
@@ -376,16 +374,15 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       }))).popup({ window })
     }
   })
-  window.webContents.on('will-navigate', (event, url) => {
+  contents.on('will-navigate', (event, url) => {
     const destination = new URL(url)
-    const current = new URL(window.webContents.getURL())
+    const current = new URL(contents.getURL())
     if (destination.protocol !== `${SCHEME}:`
       && !(destination.protocol === 'http:' && destination.origin === current.origin)) {
       event.preventDefault()
       if (['http:', 'https:'].includes(destination.protocol)) void shell.openExternal(url)
     }
   })
-  return window
 }
 
 async function main(): Promise<void> {
@@ -417,9 +414,14 @@ async function main(): Promise<void> {
   let startup: Promise<void> | undefined
   let workspaceRecovery: Promise<void> | undefined
   let mainWindow: BrowserWindow | undefined
+  let linuxFrame: LinuxDesktopFrame | undefined
+  const productContents = (window: BrowserWindow): WebContents =>
+    window === mainWindow && linuxFrame !== undefined ? linuxFrame.webContents : window.webContents
+  const currentProductContents = (): WebContents | undefined =>
+    mainWindow === undefined ? undefined : productContents(mainWindow)
   let welcomeWindow: BrowserWindow | undefined
   const installFileDrag = (): (() => Promise<void>) => installDesktopFileDrag(
-    event => assertProductSender(event),
+    (event) => { assertProductSender(event); return event.sender },
     (address, signal) => {
       const host = backend.host
       if (host === undefined) return Promise.reject(new Error('File drag Host unavailable'))
@@ -449,6 +451,23 @@ async function main(): Promise<void> {
   let locale = windowsLanguage === undefined
     ? resolveDesktopStartupLocale(null, systemLanguages) : resolveDesktopLocale(windowsLanguage)
   windowsLanguage = locale.id
+  const titlebarView = (window: BrowserWindow): DesktopTitlebarView => ({
+    locale: locale.id, theme: nativeTheme.shouldUseDarkColors ? 'dark' : 'light', maximized: window.isMaximized(),
+    messages: {
+      menuBar: locale.messages.menuBar, edit: locale.messages.edit,
+      windowMinimize: locale.messages.windowMinimize, windowMaximize: locale.messages.windowMaximize,
+      windowRestore: locale.messages.windowRestore, updateClose: locale.messages.updateClose,
+    },
+  })
+  const publishTitlebar = (): void => {
+    if (linuxFrame !== undefined && mainWindow !== undefined) {
+      mainWindow.webContents.send(TITLEBAR_IPC.changed, titlebarView(mainWindow))
+    }
+  }
+  if (process.platform === 'linux') {
+    nativeTheme.on('updated', publishTitlebar)
+    app.once('will-quit', () => { nativeTheme.off('updated', publishTitlebar) })
+  }
   let mandatoryPolicy: DesktopMandatoryUpdatePolicy | undefined
   let mandatoryUI: DesktopMandatoryUpdateWindow | undefined
   let policyAuth: DesktopPolicyTestAuth | undefined
@@ -464,7 +483,11 @@ async function main(): Promise<void> {
   const ordinaryDialogs = new Set<AbortController>()
   const currentDialogWindow = (): BrowserWindow | undefined => welcomeWindow ?? mainWindow
   const updateOverlays = new DesktopUpdateOverlays()
-  const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, updateOverlays)
+  const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, {
+    create: (parent, preload) => updateOverlays.create(parent, preload,
+      parent === mainWindow && linuxFrame !== undefined ? linuxFrame.webContents : parent.webContents,
+      () => parent === mainWindow && linuxFrame !== undefined ? linuxFrame.top : process.platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : 0),
+  })
   const isMandatory = (): boolean => mandatoryPolicy?.state.blocking === true
   const ordinaryMessageBox = async (options: UpdateDialogOptions): Promise<Electron.MessageBoxReturnValue> => {
     const controller = new AbortController()
@@ -514,8 +537,8 @@ async function main(): Promise<void> {
   let previousAccountStatus: string | undefined
   const assertProductSender = (event: IpcMainInvokeEvent): BrowserWindow => {
     assertDesktopSender(event, ['app'])
-    if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== mainWindow.webContents
-      || event.senderFrame === null || event.senderFrame !== mainWindow.webContents.mainFrame) {
+    if (mainWindow === undefined || mainWindow.isDestroyed() || event.sender !== productContents(mainWindow)
+      || event.senderFrame === null || event.senderFrame !== productContents(mainWindow).mainFrame) {
       throw new Error('dsh desktop: rejected IPC from an unowned renderer')
     }
     return mainWindow
@@ -526,7 +549,12 @@ async function main(): Promise<void> {
     if (quitting || window === undefined || window.isDestroyed()) return Promise.resolve()
     if (navigation?.window === window && navigation.url === url) return navigation.promise
     const next = { window, url, promise: Promise.resolve() }
-    next.promise = window.loadURL(url).catch((error: unknown) => {
+    next.promise = (async () => {
+      if (linuxFrame !== undefined && window.webContents.getURL() !== LINUX_TITLEBAR_URL) {
+        await window.loadURL(LINUX_TITLEBAR_URL)
+      }
+      await productContents(window).loadURL(url)
+    })().catch((error: unknown) => {
       if (quitting || shuttingDown || window.isDestroyed() || navigation !== next
         || (error instanceof Error && 'code' in error && error.code === 'ERR_ABORTED')) return
       navigation = undefined
@@ -636,7 +664,7 @@ async function main(): Promise<void> {
     updateState = state
     mandatoryUI?.sync()
     for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send(DESKTOP_IPC.updatesPresentation, presentDesktopUpdate(state))
+      productContents(window).send(DESKTOP_IPC.updatesPresentation, presentDesktopUpdate(state))
     }
     if (state.phase === 'error' && state.failedOperation !== 'check') {
       if (state.failedOperation === 'install' && fileDragStopped && !quitting) {
@@ -801,14 +829,14 @@ async function main(): Promise<void> {
     return Promise.resolve(new Response(null, { status: 404 }))
   })
 
-  installDesktopDirectoryPicker(() => mainWindow)
-  installMicrophonePermissions(session.defaultSession, () => mainWindow?.webContents)
+  installDesktopDirectoryPicker(() => mainWindow, productContents)
+  installMicrophonePermissions(session.defaultSession, currentProductContents)
   const shortcuts = installDesktopShortcuts(() => mainWindow, app.getPath('userData'),
-    process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux', () => { refreshApplicationMenu() }, window => updateOverlays.input(window))
+    process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'linux', () => { refreshApplicationMenu() }, window => updateOverlays.input(window), productContents)
   app.on('will-quit', () => { shortcuts.dispose() })
 
   ipcMain.handle(DESKTOP_IPC.boot, async (event) => {
-    assertDesktopSender(event, ['app'])
+    assertProductSender(event)
     await startup
     if (backend.host === undefined || hostUrl === undefined) throw new Error('Desktop Host is unavailable')
     return { injections, streamBaseUrl: new URL(hostUrl).origin }
@@ -816,7 +844,7 @@ async function main(): Promise<void> {
 
   ipcMain.handle(DESKTOP_IPC.bootFailed, (event, message: unknown) => {
     assertDesktopSender(event, ['app'])
-    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) {
+    if (event.sender !== currentProductContents() || event.senderFrame !== event.sender.mainFrame) {
       throw new Error('dsh desktop: rejected startup failure from a non-primary frame')
     }
     if (typeof message !== 'string') throw new Error('dsh desktop: startup failure must be text')
@@ -833,7 +861,7 @@ async function main(): Promise<void> {
   })
 
   session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['ws://127.0.0.1/*', 'wss://127.0.0.1/*'] }, (details, callback) => {
-    if (hostUrl === undefined || hostCookie === undefined || details.webContentsId !== mainWindow?.webContents.id) {
+    if (hostUrl === undefined || hostCookie === undefined || details.webContentsId !== currentProductContents()?.id) {
       callback({})
       return
     }
@@ -847,32 +875,33 @@ async function main(): Promise<void> {
 
   const assertMainApplication = (event: IpcMainInvokeEvent): BrowserWindow => {
     const owner = mainWindow
-    if (owner === undefined || event.sender !== owner.webContents || event.senderFrame !== owner.webContents.mainFrame
+    if (owner === undefined || event.sender !== productContents(owner) || event.senderFrame !== productContents(owner).mainFrame
       || !event.senderFrame.url.startsWith('dsh-app://app/')) throw new Error('Rejected Platform command')
     return owner
   }
-  ipcMain.handle(DESKTOP_IPC.windowControl, (event, action: unknown) => {
-    const window = assertMainApplication(event)
-    if (action !== 'minimize' && action !== 'toggle-maximize' && action !== 'close') {
-      throw new Error('desktop window: invalid control')
+  const assertTitlebar = (event: IpcMainInvokeEvent): BrowserWindow => {
+    const window = mainWindow
+    if (linuxFrame === undefined || window === undefined || event.sender !== window.webContents
+      || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== LINUX_TITLEBAR_URL) {
+      throw new Error('desktop titlebar: rejected sender')
     }
-    switch (action satisfies DesktopWindowControl) {
-      case 'minimize':
-        window.minimize()
-        break
-      case 'toggle-maximize':
-        if (window.isMaximized()) window.unmaximize()
-        else window.maximize()
-        break
-      case 'close':
-        window.close()
-        break
-    }
-  })
-  ipcMain.handle(DESKTOP_IPC.windowState, (event): DesktopWindowState => {
-    const window = assertMainApplication(event)
-    return { maximized: window.isMaximized(), fullscreen: window.isFullScreen() }
-  })
+    return window
+  }
+  if (process.platform === 'linux') {
+    ipcMain.handle(TITLEBAR_IPC.status, event => titlebarView(assertTitlebar(event)))
+    ipcMain.handle(TITLEBAR_IPC.control, (event, action: unknown) => {
+      const window = assertTitlebar(event)
+      switch (action) {
+        case 'minimize': window.minimize(); break
+        case 'toggle-maximize':
+          if (window.isMaximized()) window.unmaximize()
+          else window.maximize()
+          break
+        case 'close': window.close(); break
+        default: throw new Error('desktop titlebar: invalid control')
+      }
+    })
+  }
   ipcMain.on(PLATFORM_IPC.bootstrap, (event) => {
     try { event.returnValue = platformView.bootstrap(event) }
     catch { event.returnValue = null }
@@ -880,20 +909,25 @@ async function main(): Promise<void> {
   ipcMain.handle(PLATFORM_IPC.open, (event, page: unknown, bounds: unknown) => {
     const owner = assertMainApplication(event)
     if (page !== 'usage' && page !== 'top-up') throw new Error('Invalid Platform page')
-    return platformView.open(owner, page, platformBounds(bounds))
+    const rectangle = platformBounds(bounds)
+    rectangle.y += linuxFrame?.top ?? 0
+    return platformView.open(owner, page, rectangle, productContents(owner))
   })
   ipcMain.handle(PLATFORM_IPC.bounds, (event, bounds: unknown) => {
     assertMainApplication(event)
-    platformView.setBounds(platformBounds(bounds))
+    const rectangle = platformBounds(bounds)
+    rectangle.y += linuxFrame?.top ?? 0
+    platformView.setBounds(rectangle)
   })
   ipcMain.handle(PLATFORM_IPC.close, (event) => { assertMainApplication(event); platformView.close() })
   // Only the main window may synchronize its palette with the native material.
   ipcMain.on(DESKTOP_IPC.nativeThemeSet, (event, source: unknown) => {
-    if (mainWindow === undefined || event.sender !== mainWindow.webContents) return
+    if (mainWindow === undefined || event.sender !== productContents(mainWindow)) return
     if (source === 'light' || source === 'dark' || source === 'system') nativeTheme.themeSource = source
   })
   ipcMain.handle(DESKTOP_IPC.localeBootstrap, async (event) => {
-    if (event.sender !== mainWindow?.webContents || event.senderFrame !== mainWindow.webContents.mainFrame
+    const contents = currentProductContents()
+    if (contents === undefined || event.sender !== contents || event.senderFrame !== contents.mainFrame
       || new URL(event.senderFrame.url).origin !== new URL(applicationUrl).origin) {
       throw new Error('desktop welcome: rejected locale request from an unowned frame')
     }
@@ -902,7 +936,7 @@ async function main(): Promise<void> {
   })
   ipcMain.on(DESKTOP_IPC.localeChanged, (event, next: unknown) => {
     const window = mainWindow
-    if (window === undefined || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame
+    if (window === undefined || event.sender !== productContents(window) || event.senderFrame !== productContents(window).mainFrame
       || typeof next !== 'string') return
     const current = resolveDesktopStartupLocale(next, systemLanguages)
     writeDesktopLocaleCache(app.getPath('userData'), current.id)
@@ -911,6 +945,7 @@ async function main(): Promise<void> {
     platformView.notifyLocaleChanged()
     windowsLanguage = locale.id
     refreshApplicationMenu()
+    publishTitlebar()
   })
   ipcMain.handle(DESKTOP_IPC.updatesStatus, (event) => {
     assertProductSender(event)
@@ -926,8 +961,8 @@ async function main(): Promise<void> {
   })
   ipcMain.on(DESKTOP_IPC.onboardingActive, (event, active: unknown) => {
     const window = mainWindow
-    if (window === undefined || window.isDestroyed() || event.sender !== window.webContents
-      || event.senderFrame !== window.webContents.mainFrame
+    if (window === undefined || window.isDestroyed() || event.sender !== productContents(window)
+      || event.senderFrame !== productContents(window).mainFrame
       || !event.senderFrame.url.startsWith(`${SCHEME}://app/`) || typeof active !== 'boolean') return
     window.setMinimumSize(active ? 960 : 520, 600)
     if (active) {
@@ -1111,7 +1146,8 @@ async function main(): Promise<void> {
       ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
     ...development ? [
       { type: 'separator' as const },
-      { label: currentDesktopLocale().messages.reloadPageMenu, role: 'reload' as const },
+      { label: currentDesktopLocale().messages.reloadPageMenu, ...(process.platform === 'linux'
+        ? { click: () => { currentProductContents()?.reload() } } : { role: 'reload' as const }) },
       { label: currentDesktopLocale().messages.restartAppHostMenu, click: () => {
         if (quitting) return
         app.relaunch()
@@ -1166,42 +1202,46 @@ async function main(): Promise<void> {
     ...(process.platform === 'win32' ? { icon: nativeImage.createFromPath(trayIconPath) } : {}),
   })
 
-  if (process.platform === 'win32' || process.platform === 'linux') {
-    ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) => {
-      assertDesktopSender(event, ['app'])
-      if (mainWindow === undefined || event.sender !== mainWindow.webContents
-        || event.senderFrame !== mainWindow.webContents.mainFrame) throw new Error('desktop menu: rejected sender')
-      if ((name !== 'application' && name !== 'edit')
-        || typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)
-        || x < 0 || y < 0 || x > 100_000 || y > 100_000) throw new Error('desktop menu: invalid popup request')
-      const window = mainWindow
-      // Editor-owned history listens to key events rather than Chromium's native undo stack.
-      const editItem = (label: string, keyCode: string, modifiers: Array<'control'>, accelerator?: string): MenuItemConstructorOptions => ({
-        label,
-        ...(accelerator === undefined ? {} : { accelerator }),
-        click: () => {
-          shortcuts.sendEditingKey(keyCode, modifiers)
-        },
-      })
-      const items: MenuItemConstructorOptions[] = name === 'application' ? applicationItems() : [
-        editItem(currentDesktopLocale().messages.undo, 'Z', ['control'], 'Ctrl+Z'),
-        editItem(currentDesktopLocale().messages.redo, 'Y', ['control'], 'Ctrl+Y'),
-        { type: 'separator' },
-        editItem(currentDesktopLocale().messages.cut, 'X', ['control'], 'Ctrl+X'),
-        editItem(currentDesktopLocale().messages.copy, 'C', ['control'], 'Ctrl+C'),
-        editItem(currentDesktopLocale().messages.paste, 'V', ['control'], 'Ctrl+V'),
-        editItem(currentDesktopLocale().messages.delete, 'Delete', []),
-        { type: 'separator' },
-        editItem(currentDesktopLocale().messages.selectAll, 'A', ['control'], 'Ctrl+A'),
-      ]
-      const zoom = mainWindow.webContents.getZoomFactor()
-      return new Promise<void>((resolve) => {
-        Menu.buildFromTemplate(items).popup({ window, x: Math.round(x * zoom), y: Math.round(y * zoom), callback: resolve })
+  const openCaptionMenu = (window: BrowserWindow, event: IpcMainInvokeEvent, name: unknown, x: unknown, y: unknown): Promise<void> => {
+    if ((name !== 'application' && name !== 'edit')
+      || typeof x !== 'number' || typeof y !== 'number' || !Number.isFinite(x) || !Number.isFinite(y)
+      || x < 0 || y < 0 || x > 100_000 || y > 100_000) throw new Error('desktop menu: invalid popup request')
+    // Editor-owned history listens to key events rather than Chromium's native undo stack.
+    const editItem = (label: string, keyCode: string, modifiers: Array<'control'>, accelerator?: string): MenuItemConstructorOptions => ({
+      label,
+      ...(accelerator === undefined ? {} : { accelerator }),
+      click: () => {
+        shortcuts.sendEditingKey(keyCode, modifiers)
+      },
+    })
+    const items: MenuItemConstructorOptions[] = name === 'application' ? applicationItems() : [
+      editItem(currentDesktopLocale().messages.undo, 'Z', ['control'], 'Ctrl+Z'),
+      editItem(currentDesktopLocale().messages.redo, 'Y', ['control'], 'Ctrl+Y'),
+      { type: 'separator' },
+      editItem(currentDesktopLocale().messages.cut, 'X', ['control'], 'Ctrl+X'),
+      editItem(currentDesktopLocale().messages.copy, 'C', ['control'], 'Ctrl+C'),
+      editItem(currentDesktopLocale().messages.paste, 'V', ['control'], 'Ctrl+V'),
+      editItem(currentDesktopLocale().messages.delete, 'Delete', []),
+      { type: 'separator' },
+      editItem(currentDesktopLocale().messages.selectAll, 'A', ['control'], 'Ctrl+A'),
+    ]
+    const zoom = event.sender.getZoomFactor()
+    return new Promise<void>((resolve) => {
+      Menu.buildFromTemplate(items).popup({
+        window, x: Math.round(x * zoom), y: Math.round(y * zoom), callback: () => { shortcuts.focusProduct(); resolve() },
       })
     })
+  }
+  if (process.platform === 'linux') {
+    ipcMain.handle(TITLEBAR_IPC.menu, (event, name: unknown, x: unknown, y: unknown) =>
+      openCaptionMenu(assertTitlebar(event), event, name, x, y))
+  }
+  if (process.platform === 'win32') {
+    ipcMain.handle(DESKTOP_IPC.windowsMenu, (event, name: unknown, x: unknown, y: unknown) =>
+      openCaptionMenu(assertProductSender(event), event, name, x, y))
     ipcMain.on(DESKTOP_IPC.windowsAppearance, (event, _language: unknown, color: unknown, symbolColor: unknown) => {
-      if (mainWindow === undefined || event.sender !== mainWindow.webContents
-        || event.senderFrame !== mainWindow.webContents.mainFrame) return
+      if (mainWindow === undefined || event.sender !== productContents(mainWindow)
+        || event.senderFrame !== productContents(mainWindow).mainFrame) return
       if (!event.senderFrame.url.startsWith(`${SCHEME}://app/`)) return
       // Document lang starts as English before Host locale bootstrap; only localeChanged owns shell language.
       // Empty colors precede client stylesheet installation; only CSS color values cross IPC.
@@ -1221,9 +1261,26 @@ async function main(): Promise<void> {
     }
   }
   const createMainWindow = (): BrowserWindow => {
-    const window = createWindow(appPreload, false, true)
+    const window = createWindow(process.platform === 'linux'
+      ? fileURLToPath(new URL('./preload-titlebar.cjs', import.meta.url)) : appPreload, false, true)
     mainWindow = window
-    browserGuests.bind(window, (guest, name) => shortcuts.attachGuest(window, guest, name))
+    if (process.platform === 'linux') {
+      linuxFrame = new LinuxDesktopFrame(window, appPreload)
+      configureProductContents(window, linuxFrame.webContents)
+      window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      window.webContents.on('will-navigate', (event, url) => { if (url !== LINUX_TITLEBAR_URL) event.preventDefault() })
+      window.on('maximize', publishTitlebar)
+      window.on('unmaximize', publishTitlebar)
+    }
+    const contents = productContents(window)
+    if (process.platform === 'linux') {
+      window.on('focus', () => { shortcuts.focusProduct() })
+      for (const source of [contents, window.webContents]) source.on('before-input-event', (_event, input) => {
+        if (input.type === 'keyDown' && input.key === 'F12') contents.toggleDevTools()
+      })
+      contents.on('page-title-updated', (_event, title) => { window.setTitle(title) })
+    }
+    browserGuests.bind(contents, (guest, name) => shortcuts.attachGuest(window, guest, name))
     shortcuts.attach(window)
     window.on('focus', automaticCheck)
     // Closing hides: the page and the Host keep running, and the next show resumes the same document.
@@ -1252,25 +1309,27 @@ async function main(): Promise<void> {
       window.on('focus', () => { sessionEnding = false })
       window.on('show', () => { sessionEnding = false })
     }
-    window.on('closed', () => { if (mainWindow === window) mainWindow = undefined })
-    window.webContents.on('console-message', (details) => {
-      if (details.level !== 'error') return
-      rendererConsole.push(`${details.sourceId}:${String(details.lineNumber)} ${details.message}`)
-    })
-    window.webContents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
-      if (isMainFrame && code !== -3 && !quitting && !window.isDestroyed()) {
-        reportFatal(new Error(`Desktop page failed to load: ${url} (${String(code)}: ${description})`), 'renderer')
-      }
-    })
-    window.webContents.on('preload-error', (_event, _path, error) => {
-      if (!quitting && !window.isDestroyed()) reportFatal(error, 'renderer')
-    })
-    window.webContents.on('render-process-gone', (_event, details) => {
-      navigation = undefined
-      if (!quitting && !window.isDestroyed() && details.reason !== 'clean-exit') {
-        reportFatal(new Error(`Desktop renderer exited: ${details.reason}`), 'renderer')
-      }
-    })
+    window.on('closed', () => { if (mainWindow === window) { mainWindow = undefined; linuxFrame = undefined } })
+    for (const contents of new Set([productContents(window), window.webContents])) {
+      contents.on('console-message', (details) => {
+        if (details.level !== 'error') return
+        rendererConsole.push(`${details.sourceId}:${String(details.lineNumber)} ${details.message}`)
+      })
+      contents.on('did-fail-load', (_event, code, description, url, isMainFrame) => {
+        if (isMainFrame && code !== -3 && !quitting && !window.isDestroyed()) {
+          reportFatal(new Error(`Desktop page failed to load: ${url} (${String(code)}: ${description})`), 'renderer')
+        }
+      })
+      contents.on('preload-error', (_event, _path, error) => {
+        if (!quitting && !window.isDestroyed()) reportFatal(error, 'renderer')
+      })
+      contents.on('render-process-gone', (_event, details) => {
+        navigation = undefined
+        if (!quitting && !window.isDestroyed() && details.reason !== 'clean-exit') {
+          reportFatal(new Error(`Desktop renderer exited: ${details.reason}`), 'renderer')
+        }
+      })
+    }
     return window
   }
   const enterWorkspace = async ({ activate = true }: { activate?: boolean } = {}): Promise<void> => {
@@ -1283,7 +1342,7 @@ async function main(): Promise<void> {
     enteredWorkspace = true
     if (welcomeWindow !== undefined) {
       welcomeWindow.close()
-      window.webContents.send(DESKTOP_IPC.enterWorkspace)
+      productContents(window).send(DESKTOP_IPC.enterWorkspace)
     }
     welcomeWindow = undefined
     if (raiseAfterUpdate) {
@@ -1292,7 +1351,7 @@ async function main(): Promise<void> {
       window.focus()
     }
     if (activate && development && process.env.DSH_DESKTOP_OPEN_DEVTOOLS !== '0') {
-      window.webContents.openDevTools({ mode: 'detach' })
+      productContents(window).openDevTools({ mode: 'detach' })
     }
   }
   let openingWelcome: Promise<void> | undefined
@@ -1499,7 +1558,7 @@ async function main(): Promise<void> {
   if (isQuitting()) return
   const window = currentMainWindow()
   if (window !== undefined && development && process.env.DSH_DESKTOP_OPEN_DEVTOOLS !== '0') {
-    window.webContents.openDevTools({ mode: 'detach' })
+    productContents(window).openDevTools({ mode: 'detach' })
   }
   publishUpdate(updateState)
 }

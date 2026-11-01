@@ -21,34 +21,35 @@ async function fixture() {
   const icon = {} as NativeImage
   electron.getFileIcon.mockResolvedValue(icon)
   const frame = Object.assign({} as WebFrameMain, { url: 'dsh-app://app/' })
+  const contents = Object.assign({} as WebContents, { mainFrame: frame, startDrag: vi.fn() })
   const window = Object.assign({} as BrowserWindow, { isDestroyed: () => false,
-    webContents: Object.assign({} as WebContents, { mainFrame: frame, startDrag: vi.fn() }) })
+    webContents: Object.assign({} as WebContents, { mainFrame: { url: 'dsh-app://shell/titlebar.html' }, startDrag: vi.fn() }) })
   let current: BrowserWindow | undefined = window
   const resolve = vi.fn<Parameters<typeof installDesktopFileDrag>[1]>(async () => null)
-  const owner = (event: IpcMainInvokeEvent): BrowserWindow => {
+  const owner = (event: IpcMainInvokeEvent): WebContents => {
     assertDesktopSender(event, ['app'])
-    if (current === undefined || event.sender !== current.webContents || event.senderFrame !== frame) throw new Error('Unowned file drag request')
-    return current
+    if (current === undefined || event.sender !== contents || event.senderFrame !== frame) throw new Error('Unowned file drag request')
+    return event.sender
   }
   const dispose = installDesktopFileDrag(owner, resolve)
   onTestFinished(dispose)
   const handlers = new Map<string, Handler>(electron.handle.mock.calls.map(([channel, handler]) => [channel, handler]))
-  const event = Object.assign({} as IpcMainInvokeEvent, { sender: window.webContents, senderFrame: frame })
+  const event = Object.assign({} as IpcMainInvokeEvent, { sender: contents, senderFrame: frame })
   const call = (channel: string, ...args: unknown[]) => Promise.resolve().then(() => {
     const identity = channel === DESKTOP_IPC.fileDragPrepare && args.length === 1 ? [randomUUID()] : []
     return (handlers.get(channel) as Handler)(event, ...args, ...identity)
   })
   const prepare = (bytes: Uint8Array, name = 'original.pdf', mediaType = 'application/pdf') => call(DESKTOP_IPC.fileDragPrepare, { kind: 'bytes', bytes, name, mediaType })
-  return { root, window, frame, event, icon, call, prepare, dispose, resolve, detach: () => { current = undefined } }
+  return { root, window, contents, frame, event, icon, call, prepare, dispose, resolve, handlers, detach: () => { current = undefined } }
 }
 
 it('delivers original PDF bytes and filename through native copy drag', async () => {
   const f = await fixture()
   const bytes = new TextEncoder().encode('%PDF-1.4\noriginal\n%%EOF')
   const handle = await f.prepare(bytes, '报告.pdf')
-  expect(f.window.webContents.startDrag).not.toHaveBeenCalled()
+  expect(f.contents.startDrag).not.toHaveBeenCalled()
   expect(await f.call(DESKTOP_IPC.fileDragStart, handle)).toBe(true)
-  const [request] = f.window.webContents.startDrag.mock.calls[0] as [{ file: string; icon: NativeImage }]
+  const [request] = f.contents.startDrag.mock.calls[0] as [{ file: string; icon: NativeImage }]
   expect(request.icon).toBe(f.icon)
   expect(request.file).toContain('报告.pdf')
   expect(new Uint8Array(await readFile(request.file))).toEqual(bytes)
@@ -59,11 +60,26 @@ it('delivers original PDF bytes and filename through native copy drag', async ()
   expect(await readdir(f.root)).toEqual([])
 })
 
+it('rejects caption IPC and starts native dragging only from the authorized workspace contents', async () => {
+  const f = await fixture()
+  expect(f.window.webContents).not.toBe(f.contents)
+  const handle = await f.prepare(new Uint8Array([1]))
+  const shellEvent = Object.assign({} as IpcMainInvokeEvent, {
+    sender: f.window.webContents, senderFrame: f.window.webContents.mainFrame,
+  })
+  expect(() => f.handlers.get(DESKTOP_IPC.fileDragStart)!(shellEvent, handle)).toThrow('unowned renderer')
+  expect(f.window.webContents.startDrag).not.toHaveBeenCalled()
+  expect(f.contents.startDrag).not.toHaveBeenCalled()
+  expect(await f.call(DESKTOP_IPC.fileDragStart, handle)).toBe(true)
+  expect(f.contents.startDrag).toHaveBeenCalledOnce()
+  expect(f.window.webContents.startDrag).not.toHaveBeenCalled()
+})
+
 it('uses shared sender authorization and releases failed native starts', async () => {
   const f = await fixture()
   expect(await f.call(DESKTOP_IPC.fileDragStart, 'foreign')).toBe(false)
   const handle = await f.prepare(new Uint8Array([1]))
-  f.window.webContents.startDrag.mockImplementationOnce(() => { throw new Error('OS rejected drag') })
+  f.contents.startDrag.mockImplementationOnce(() => { throw new Error('OS rejected drag') })
   expect(await f.call(DESKTOP_IPC.fileDragStart, handle)).toBe(false)
   await vi.waitFor(async () => { expect(await readdir(f.root)).toEqual([]) })
   f.frame.url = 'https://other.test/'
@@ -136,7 +152,7 @@ it('borrows only authorized unchanged files with the requested export name, neve
   expect(f.resolve).toHaveBeenCalledWith(request.address, expect.any(AbortSignal))
   expect(await readdir(f.root)).toEqual(['report.pdf'])
   expect(await f.call(DESKTOP_IPC.fileDragStart, handle)).toBe(true)
-  expect(f.window.webContents.startDrag).toHaveBeenCalledWith({ file: path, icon: f.icon })
+  expect(f.contents.startDrag).toHaveBeenCalledWith({ file: path, icon: f.icon })
   await f.dispose()
   expect(await readFile(path)).toEqual(bytes)
 })

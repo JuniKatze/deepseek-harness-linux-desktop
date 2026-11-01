@@ -51,6 +51,30 @@ it.each(['darwin', 'win32'] as const)('fits inside the owner with native caption
   expect(f.parent.listenerCount('resize')).toBe(0)
 })
 
+it('keeps the Linux caption outside the overlay and blocks the separate workspace', () => {
+  const f = fixture()
+  const workspace = Object.assign(new EventEmitter(), { focus: vi.fn() })
+  let top = 40
+  const overlay = f.overlays.create(f.owner, 'isolated-preload', workspace, () => top)
+  expect(f.views[0]!.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 40, width: 900, height: 610 })
+  const captionKey = { preventDefault: vi.fn() }
+  const workspaceKey = { preventDefault: vi.fn() }
+  f.parent.webContents.emit('before-input-event', captionKey)
+  workspace.emit('before-input-event', workspaceKey)
+  expect(captionKey.preventDefault).not.toHaveBeenCalled()
+  expect(workspaceKey.preventDefault).toHaveBeenCalledOnce()
+  top = 0
+  f.parent.emit('enter-full-screen')
+  expect(f.views[0]!.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 900, height: 650 })
+  f.parent.isFocused.mockReturnValue(true)
+  overlay.destroy()
+  expect(workspace.focus).toHaveBeenCalledOnce()
+  expect(f.parent.webContents.focus).not.toHaveBeenCalled()
+  expect(workspace.listenerCount('before-input-event')).toBe(0)
+  expect(f.parent.listenerCount('enter-full-screen')).toBe(0)
+  expect(f.parent.listenerCount('leave-full-screen')).toBe(0)
+})
+
 it('blocks keyboard input and redirects focus only while the owner is focused', () => {
   const f = fixture(); const overlay = f.create(); const event = { preventDefault: vi.fn() }
   f.parent.webContents.emit('before-input-event', event)

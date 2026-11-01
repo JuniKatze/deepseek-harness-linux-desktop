@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, expect, it, vi } from 'vitest'
 import { DESKTOP_IPC } from '../src/ipc.ts'
-import { syncWindowFullscreen } from '../src/preload-platform.ts'
+import { markDocumentPlatform, syncWindowFullscreen } from '../src/preload-platform.ts'
 
 const on = vi.hoisted(() => vi.fn())
 vi.mock('electron', () => ({ ipcRenderer: { on } }))
@@ -10,6 +10,14 @@ afterEach(() => {
   delete document.documentElement.dataset.fullscreen
   vi.restoreAllMocks()
   on.mockClear()
+})
+
+it('marks Linux without adding titlebar layout to the product document', () => {
+  vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+  markDocumentPlatform()
+  expect(document.documentElement.dataset.platform).toBe('linux')
+  expect(document.documentElement.hasAttribute('data-linux-titlebar')).toBe(false)
+  expect(document.documentElement.style.getPropertyValue('--dsh-linux-titlebar-height')).toBe('')
 })
 
 it.each(['linux', 'darwin', 'win32'] as const)('mirrors the sent fullscreen state onto html[data-fullscreen] on %s', (platform) => {

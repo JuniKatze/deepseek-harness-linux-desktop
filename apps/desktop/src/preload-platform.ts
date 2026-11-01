@@ -2,7 +2,6 @@
 
 import { ipcRenderer } from 'electron'
 import { DESKTOP_IPC } from './ipc.ts'
-import { LINUX_TITLEBAR_HEIGHT } from './windows-layout.ts'
 
 /**
  * Sets `data-platform` (e.g. `darwin`) on `<html>`, deferring to DOMContentLoaded
@@ -11,10 +10,6 @@ import { LINUX_TITLEBAR_HEIGHT } from './windows-layout.ts'
 export function markDocumentPlatform(): void {
   const mark = (): void => {
     document.documentElement.dataset.platform = process.platform
-    if (process.platform === 'linux') {
-      document.documentElement.dataset.linuxTitlebar = ''
-      document.documentElement.style.setProperty('--dsh-linux-titlebar-height', `${LINUX_TITLEBAR_HEIGHT}px`)
-    }
   }
   // lib.dom types documentElement non-null, but a preload runs before the
   // document root exists.

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream, statSync, type Stats } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { basename } from 'node:path'
-import { app, ipcMain, type BrowserWindow, type IpcMainInvokeEvent, type NativeImage } from 'electron'
+import { app, ipcMain, type IpcMainInvokeEvent, type NativeImage, type WebContents } from 'electron'
 import { resolveDragFileName, type DesktopFileSource, type FileDragHandle } from '@deepseek-ai/dsh-util-file-drag'
 import { DESKTOP_IPC } from './ipc.ts'
 import { DragFiles } from './file-drag-files.ts'
@@ -61,12 +61,12 @@ async function cancellable<T>(operation: Promise<T>, signal: AbortSignal): Promi
 
 /**
  * Register file preparation and native dragging.
- * @param owner - shared product sender authorization, returning its window.
+ * @param owner - 共享产品 sender 授权函数，返回可发起原生拖拽的工作区 WebContents。
  * @param resolveResource - cancellable private Host authorization; renderer paths are never used directly.
  * @returns cleanup aborting resource reads and awaiting tracked writes/removals without waiting for the system icon service.
  */
 export function installDesktopFileDrag(
-  owner: (event: IpcMainInvokeEvent) => BrowserWindow,
+  owner: (event: IpcMainInvokeEvent) => WebContents,
   resolveResource: (address: string, signal: AbortSignal) => Promise<LocalResource | null>,
 ): () => Promise<void> {
   let disposed = false
@@ -75,7 +75,7 @@ export function installDesktopFileDrag(
   const pending = new Set<Promise<FileDragHandle | undefined>>()
   const icons = new Map<string, NativeImage>()
   const borrowed = new Map<string, { resource: LocalResource; version: Stats }>()
-  const authorize = (event: IpcMainInvokeEvent): BrowserWindow => {
+  const authorize = (event: IpcMainInvokeEvent): WebContents => {
     if (disposed) throw new Error('File transfer closed')
     return owner(event)
   }
@@ -124,7 +124,7 @@ export function installDesktopFileDrag(
     if (typeof requestId === 'string') preparations.get(requestId)?.abort(new Error('File preparation cancelled'))
   })
   ipcMain.handle(DESKTOP_IPC.fileDragStart, (event, handle: unknown) => {
-    const window = authorize(event)
+    const contents = authorize(event)
     const icon = typeof handle === 'string' ? icons.get(handle) : undefined
     if (icon === undefined || typeof handle !== 'string') return false
     const file = files.take(handle, false)
@@ -133,7 +133,7 @@ export function installDesktopFileDrag(
       const original = borrowed.get(handle)
       if (original !== undefined && !sameVersion(original.version, statSync(original.resource.path))) throw new Error('File changed before dragging')
       authorize(event)
-      window.webContents.startDrag({ file, icon })
+      contents.startDrag({ file, icon })
       files.take(handle)
       icons.delete(handle)
       borrowed.delete(handle)

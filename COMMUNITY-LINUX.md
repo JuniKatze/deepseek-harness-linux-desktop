@@ -38,6 +38,8 @@ The package is currently unsigned. Verify that it came from this repository's Re
 
 The sidebar uses the upstream DeepSeek Harness logo and wordmark. Closing the workspace window hides it to the system tray without stopping tasks; use the tray menu to reopen it or explicitly quit. Quitting warns before interrupting active tasks. This does not enable login autostart or a separate background service.
 
+The Linux titlebar is implemented by the Electron shell without modifying DSH plugins. The dependency patch for the Office WASM fallback remains in place.
+
 ### Known limitations
 
 - No in-app automatic updates or server-enforced updates.
@@ -91,6 +93,8 @@ sudo apt install ./dsh-desktop-linux-<版本>-linux-amd64-unsigned.deb
 当前安装包未签名。安装前请确认文件来自本仓库的 Releases 页面。
 
 侧栏使用上游 DeepSeek Harness 的 logo 和字标。关闭工作区窗口会隐藏到系统托盘，不会停止任务；通过托盘菜单可以重新打开或明确退出，退出前会提示正在运行的任务将被中断。这不启用登录自启动，也不安装独立后台服务。
+
+Linux 标题栏由 Electron 壳实现，不修改 DSH 插件。Office WASM 回退所需的依赖补丁仍然保留。
 
 ### 已知限制
 

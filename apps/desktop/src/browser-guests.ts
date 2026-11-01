@@ -1,6 +1,6 @@
 /** Main-process ownership and fixed isolation policy for Sidebar webview guests. */
 import { randomUUID } from 'node:crypto'
-import { app, session, type BrowserWindow, type Session, type WebContents } from 'electron'
+import { app, session, type Session, type WebContents } from 'electron'
 import type { DesktopBrowserLeaseId, DesktopBrowserOpenRequest, DesktopBrowserReservation } from '@deepseek-ai/dsh-client-ui-sidebar-browser/types'
 import { DESKTOP_IPC } from './ipc.ts'
 
@@ -64,11 +64,10 @@ export class DesktopBrowserGuests {
 
   /**
    * Install attachment checks before the application document can create a webview.
-   * @param window - primary application window.
+   * @param owner - 承载 DSH 工作区的 WebContents；只有它可以创建和持有浏览器 guest。
    * @param attachInput - attaches native input after guest ownership is verified and returns its disposer.
    */
-  bind(window: BrowserWindow, attachInput: (guest: WebContents, name: DesktopBrowserLeaseId) => () => void): void {
-    const owner = window.webContents
+  bind(owner: WebContents, attachInput: (guest: WebContents, name: DesktopBrowserLeaseId) => () => void): void {
     owner.on('will-attach-webview', (event, preferences, params) => {
       const id = typeof params.src === 'string' && params.src.startsWith('about:blank#')
         ? params.src.slice('about:blank#'.length) : ''

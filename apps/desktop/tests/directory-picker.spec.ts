@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { BrowserWindow, IpcMainInvokeEvent, OpenDialogReturnValue } from 'electron'
+import type { BrowserWindow, IpcMainInvokeEvent, OpenDialogReturnValue, WebContents } from 'electron'
 import { DESKTOP_IPC } from '../src/ipc.ts'
 
 const electron = vi.hoisted(() => ({
@@ -13,8 +13,9 @@ beforeEach(() => { vi.resetAllMocks() })
 
 function fixture() {
   const frame = { url: 'dsh-app://app/' }
+  const contents = Object.assign({} as WebContents, { mainFrame: frame })
   const window = {
-    webContents: { mainFrame: frame },
+    webContents: { mainFrame: { url: 'dsh-app://shell/titlebar.html' } },
     isDestroyed: vi.fn(() => false),
     isMinimized: vi.fn(() => false),
     restore: vi.fn(),
@@ -22,11 +23,11 @@ function fixture() {
     focus: vi.fn(),
   }
   let current: BrowserWindow | undefined = window as unknown as BrowserWindow
-  installDesktopDirectoryPicker(() => current)
+  installDesktopDirectoryPicker(() => current, () => contents)
   expect(electron.handle.mock.calls[0]?.[0]).toBe(DESKTOP_IPC.directoryPick)
   const handler = electron.handle.mock.calls[0]![1]
-  const event = { sender: window.webContents, senderFrame: frame } as unknown as IpcMainInvokeEvent
-  return { window, frame, event, handler, detach: () => { current = undefined } }
+  const event = Object.assign({} as IpcMainInvokeEvent, { sender: contents, senderFrame: frame })
+  return { window, contents, frame, event, handler, detach: () => { current = undefined } }
 }
 
 describe('Desktop directory picker', () => {
@@ -46,6 +47,19 @@ describe('Desktop directory picker', () => {
     electron.showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] })
     await expect(f.handler(f.event)).resolves.toBeNull()
     expect(electron.showOpenDialog).toHaveBeenCalledTimes(2)
+  })
+
+  it('rejects the caption renderer while keeping native dialogs parented to its BrowserWindow', async () => {
+    const f = fixture()
+    expect(f.window.webContents).not.toBe(f.contents)
+    const shellEvent = Object.assign({} as IpcMainInvokeEvent, {
+      sender: f.window.webContents, senderFrame: f.window.webContents.mainFrame,
+    })
+    await expect(f.handler(shellEvent)).rejects.toThrow('unowned renderer')
+    expect(electron.showOpenDialog).not.toHaveBeenCalled()
+    electron.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/workspace'] })
+    await expect(f.handler(f.event)).resolves.toBe('/workspace')
+    expect(electron.showOpenDialog).toHaveBeenCalledExactlyOnceWith(f.window, { properties: ['openDirectory', 'createDirectory'] })
   })
 
   it('releases a failed dialog so the user can retry', async () => {

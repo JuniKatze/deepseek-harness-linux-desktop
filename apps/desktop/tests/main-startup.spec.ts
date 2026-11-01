@@ -1,9 +1,9 @@
 import { parsePluginOperationRecord } from '@deepseek-ai/dsh-plugin-manager/diagnostic'
 import type { DesktopHostProcess } from '../src/host-process.ts'
 import type { AccountView } from '@deepseek-ai/dsh-deepseek-account/types'
-import { WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
+import { LINUX_TITLEBAR_HEIGHT, WINDOWS_TITLEBAR_HEIGHT } from '../src/windows-layout.ts'
+import { TITLEBAR_IPC } from '../src/titlebar-api.ts'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
-import type { IpcMainInvokeEvent } from 'electron'
 import { join } from 'node:path'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -42,6 +42,7 @@ const harness = await vi.hoisted(async () => {
   }
   const windows: FakeWindow[] = []
   let windowFailure: Error | undefined
+  let nextContentsId = 42
   const powerMonitor = new EventEmitter()
   const hosts: FakeHost[] = []
   const handlers = new Map<string, InvokeHandler>()
@@ -79,15 +80,19 @@ const harness = await vi.hoisted(async () => {
     readonly contentView = { addChildView: vi.fn(), removeChildView: vi.fn() }
     readonly urls: string[] = []
     readonly webContents = Object.assign(new EventEmitter(), {
-      id: 42,
+      id: nextContentsId++,
+      loadURL: (url: string) => this.loadURL(url),
+      close: vi.fn((_options?: { waitForBeforeUnload: boolean }) => { this.destroy() }),
       setWindowOpenHandler: vi.fn(),
       insertCSS: vi.fn(async () => 'blur'),
       removeInsertedCSS: vi.fn(async () => {}),
       openDevTools: vi.fn(),
+      toggleDevTools: vi.fn(),
       getURL: () => this.urls.at(-1) ?? '',
       mainFrame: { url: '' },
       getZoomFactor: () => 1,
       isDestroyed: () => this.destroyed,
+      isFocused: () => true,
       setIgnoreMenuShortcuts: vi.fn(),
       focus: vi.fn(),
       sendInputEvent: vi.fn(),
@@ -108,7 +113,7 @@ const harness = await vi.hoisted(async () => {
     readonly setTitleBarOverlay = vi.fn()
     readonly setVibrancy = vi.fn()
     readonly setBackgroundColor = vi.fn()
-    constructor(readonly options: { show: boolean; modal?: boolean }) {
+    constructor(readonly options: Electron.BrowserWindowConstructorOptions) {
       super(); if (windowFailure !== undefined) throw windowFailure; windows.push(this)
     }
     isDestroyed() { return this.destroyed }
@@ -132,10 +137,10 @@ const harness = await vi.hoisted(async () => {
     }
     static getAllWindows() { return windows.filter(window => !window.destroyed) }
     setMenu() {}
-    getContentBounds() { return { x: 0, y: 0, width: 900, height: 650 } }
-    setBounds() {}
+    readonly getContentBounds = vi.fn(() => ({ x: 0, y: 0, width: 900, height: 650 }))
+    readonly setBounds = vi.fn<(bounds: Electron.Rectangle) => void>()
     setTitle = vi.fn()
-    destroy() { this.destroyed = true; this.emit('closed') }
+    destroy() { this.destroyed = true; this.webContents.emit('destroyed'); this.emit('closed') }
     close() {
       const event = { preventDefault: vi.fn() }
       this.emit('close', event)
@@ -144,14 +149,10 @@ const harness = await vi.hoisted(async () => {
   }
   const views: FakeView[] = []
   class FakeView extends FakeWindow {
-    constructor() {
-      super({ show: false })
+    constructor(options: Electron.WebContentsViewConstructorOptions) {
+      super({ show: false, ...options })
       windows.pop()
       views.push(this)
-      Object.assign(this.webContents, {
-        loadURL: (url: string) => this.loadURL(url),
-        close: () => { this.destroy(); this.webContents.emit('destroyed') },
-      })
     }
   }
   class FakeHost {
@@ -206,7 +207,7 @@ const harness = await vi.hoisted(async () => {
   let analyticsEnabled = true
   let analyticsEnabledListener: ((enabled: boolean) => void) | undefined
   const analytics = vi.fn(async (_event: unknown) => {})
-  const nativeTheme = { themeSource: 'system', shouldUseDarkColors: false }
+  const nativeTheme = Object.assign(new EventEmitter(), { themeSource: 'system', shouldUseDarkColors: false })
   const trays: FakeTray[] = []
   class FakeTray extends EventEmitter {
     readonly setToolTip = vi.fn()
@@ -271,6 +272,8 @@ const harness = await vi.hoisted(async () => {
       backgroundNotice.markerPath = undefined
       shellDialog.isOpen = false
       powerMonitor.removeAllListeners()
+      nativeTheme.removeAllListeners()
+      nextContentsId = 42
       app.isPackaged = true
       windowFailure = undefined
       pluginsEnabled = false
@@ -409,11 +412,15 @@ function configureTestAuthPopup(allow: boolean): void {
   writeFileSync(join(directory, 'settings.json'), JSON.stringify({ updates: { allowTestAuthPopupWindow: allow } }))
 }
 
+function applicationContents() {
+  return process.platform === 'linux' ? harness.views[0]!.webContents : harness.windows[0]!.webContents
+}
+
 function invoke(channel: string, origin = channel === DESKTOP_IPC.boot ? 'app' : 'shell', ...args: unknown[]): unknown {
   const handler = harness.handlers.get(channel)
   if (handler === undefined) throw new Error(`missing handler ${channel}`)
-  if (origin === 'app') {
-    const sender = harness.windows[0]!.webContents
+  if (origin === 'app' || origin === 'caption') {
+    const sender = origin === 'app' ? applicationContents() : harness.windows[0]!.webContents
     return handler({ sender, senderFrame: sender.mainFrame }, ...args)
   }
   return handler({ senderFrame: { url: `dsh-app://${origin}/index.html` } }, ...args)
@@ -422,8 +429,9 @@ function invoke(channel: string, origin = channel === DESKTOP_IPC.boot ? 'app' :
 function applicationMenuItems(): MenuItemConstructorOptions[] {
   const native = harness.menu.mock.calls[0]?.[0][0]?.submenu
   if (Array.isArray(native)) return native
-  const sender = harness.windows[0]!.webContents
-  void harness.handlers.get(DESKTOP_IPC.windowsMenu)!({ sender, senderFrame: sender.mainFrame }, 'application', 0, 0)
+  const sender = process.platform === 'linux' ? harness.windows[0]!.webContents : applicationContents()
+  const channel = process.platform === 'linux' ? TITLEBAR_IPC.menu : DESKTOP_IPC.windowsMenu
+  void harness.handlers.get(channel)!({ sender, senderFrame: sender.mainFrame }, 'application', 0, 0)
   return harness.menu.mock.lastCall![0]
 }
 
@@ -519,6 +527,7 @@ describe('desktop main startup', () => {
         ['update-dialog.html', 'text/html'], ['update-dialog.css', 'text/css'], ['update-dialog.js', 'text/javascript'],
         ['mandatory-update.html', 'text/html'], ['mandatory-update.css', 'text/css'], ['mandatory-update.js', 'text/javascript'],
         ['update-close.svg', 'image/svg+xml'], ['shell-theme.js', 'text/javascript'],
+        ['titlebar.html', 'text/html'], ['titlebar.css', 'text/css'], ['titlebar.js', 'text/javascript'],
       ] as const) {
         const response = await handler(new Request(`dsh-app://shell/${name}`))
         expect(response.status).toBe(200)
@@ -839,22 +848,31 @@ describe('desktop main startup', () => {
     }
   })
 
-  it('accepts product IPC only from the current application top frame in the owned main window', async () => {
+  it.each(['win32', 'linux'] as const)('accepts product IPC only from the owned application top frame on %s', async (platform) => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
     await readyForUpdate()
-    const sender = harness.windows[0]!.webContents
+    const sender = applicationContents()
+    const other = new harness.FakeWindow({ show: false })
+    await other.loadURL('dsh-app://app/')
+    const foreign = [
+      { sender: {}, senderFrame: sender.mainFrame },
+      { sender: other.webContents, senderFrame: other.webContents.mainFrame },
+      { sender, senderFrame: { url: sender.mainFrame.url } },
+      { sender, senderFrame: { url: 'http://127.0.0.1:40000/' } },
+      ...platform === 'linux' ? [{ sender: harness.windows[0]!.webContents, senderFrame: harness.windows[0]!.webContents.mainFrame }] : [],
+    ]
     for (const channel of [DESKTOP_IPC.updatesStatus, DESKTOP_IPC.deviceInfo]) {
       const handler = harness.handlers.get(channel)!
       expect(() => handler({ sender, senderFrame: sender.mainFrame })).not.toThrow()
-      for (const event of [
-        { sender: {}, senderFrame: sender.mainFrame },
-        { sender, senderFrame: { url: sender.mainFrame.url } },
-        { sender, senderFrame: { url: 'http://127.0.0.1:40000/' } },
-      ]) expect(() => handler(event)).toThrow('unowned renderer')
+      for (const event of foreign) expect(() => handler(event)).toThrow('unowned renderer')
       const original = sender.mainFrame.url
       sender.mainFrame.url = 'http://127.0.0.1:40000/'
       expect(() => handler({ sender, senderFrame: sender.mainFrame })).toThrow('unowned renderer')
       sender.mainFrame.url = original
     }
+    const boot = harness.handlers.get(DESKTOP_IPC.boot)!
+    await expect(boot({ sender, senderFrame: sender.mainFrame })).resolves.toHaveProperty('streamBaseUrl')
+    for (const event of foreign) await expect(boot(event)).rejects.toThrow('unowned renderer')
   })
 
   it.each(['darwin', 'win32', 'linux'] as const)('selects custom window chrome on %s', async (platform) => {
@@ -862,7 +880,7 @@ describe('desktop main startup', () => {
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
-    expect(window.urls).toEqual(['dsh-app://app/'])
+    expect(window.urls).toEqual([platform === 'linux' ? 'dsh-app://shell/titlebar.html' : 'dsh-app://app/'])
     if (platform === 'darwin') {
       expect(window.options).toMatchObject({ titleBarStyle: 'hiddenInset', vibrancy: 'sidebar', backgroundColor: '#00000000' })
     } else if (platform === 'win32') {
@@ -877,6 +895,20 @@ describe('desktop main startup', () => {
       expect(window.options).not.toHaveProperty('titleBarStyle')
       expect(window.options).not.toHaveProperty('vibrancy')
       expect(harness.menu.setApplicationMenu).toHaveBeenCalledWith(null)
+      expect(window.options.webPreferences?.preload).toContain('preload-titlebar.cjs')
+      expect(window.options.webPreferences).toMatchObject({ webviewTag: false })
+      expect(harness.views).toHaveLength(1)
+      const view = harness.views[0]!
+      expect(view.urls).toEqual(['dsh-app://app/'])
+      expect(view.options.webPreferences?.preload).toContain('preload-app.cjs')
+      expect(view.options.webPreferences).toMatchObject({
+        nodeIntegration: false, contextIsolation: true,
+        sandbox: true, webSecurity: true, webviewTag: true,
+      })
+      expect(view.webContents.id).not.toBe(window.webContents.id)
+      expect(view.webContents.mainFrame).not.toBe(window.webContents.mainFrame)
+      expect(window.contentView.addChildView).toHaveBeenCalledExactlyOnceWith(view)
+      expect(view.webContents.insertCSS).not.toHaveBeenCalled()
     }
     expect(harness.hosts).toHaveLength(0)
   })
@@ -898,18 +930,19 @@ describe('desktop main startup', () => {
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
-    const sent = () => window.webContents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)
+    const contents = applicationContents()
+    const sent = () => contents.send.mock.calls.filter(([channel]) => channel === DESKTOP_IPC.windowFullscreen)
     expect(sent()).toHaveLength(0)
     window.fullscreen = true
     window.emit('enter-full-screen')
     expect(sent().at(-1)).toEqual([DESKTOP_IPC.windowFullscreen, true])
-    // A reload re-registers the preload listener; the finished load resends
-    // the current state so fullscreen CSS survives the reload.
-    window.webContents.emit('did-finish-load')
+    // preload 在重载后重新订阅，需要再次接收当前全屏状态。
+    contents.emit('did-finish-load')
     expect(sent().at(-1)).toEqual([DESKTOP_IPC.windowFullscreen, true])
     window.fullscreen = false
     window.emit('leave-full-screen')
     expect(sent().at(-1)).toEqual([DESKTOP_IPC.windowFullscreen, false])
+    if (platform === 'linux') expect(window.webContents.send.mock.calls.some(([channel]) => channel === DESKTOP_IPC.windowFullscreen)).toBe(false)
     const relayed = sent().length
     window.destroyed = true
     window.emit('enter-full-screen')
@@ -1022,7 +1055,7 @@ describe('desktop main startup', () => {
     appearance(event, 'zh-CN', '#fff', '#000')
     const handler = harness.handlers.get(DESKTOP_IPC.windowsMenu)!
     const foreignEvent = { ...event, sender: {} }
-    expect(() => handler(foreignEvent, 'application', 48, 34)).toThrow('rejected sender')
+    expect(() => handler(foreignEvent, 'application', 48, 34)).toThrow('unowned renderer')
     expect(() => handler(event, 'arbitrary-command', 48, 34)).toThrow('invalid popup request')
     expect(() => handler(event, 'application', NaN, 34)).toThrow('invalid popup request')
     const application = handler(event, 'application', 48, 34)
@@ -1049,27 +1082,96 @@ describe('desktop main startup', () => {
     await edit
   })
 
-  it('exposes Linux caption menu and window controls only to the owned application frame', async () => {
+  it('exposes Linux titlebar state, controls and menus only to its owned shell document', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
-    const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame }
-    expect(harness.handlers.has(DESKTOP_IPC.windowsMenu)).toBe(true)
-    expect(harness.handlers.has(DESKTOP_IPC.windowControl)).toBe(true)
-    expect(harness.handlers.has(DESKTOP_IPC.windowState)).toBe(true)
-    expect(harness.handlers.get(DESKTOP_IPC.windowState)!(event)).toEqual({ maximized: false, fullscreen: false })
-    await harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'toggle-maximize')
+    const caption = window.webContents
+    const contents = applicationContents()
+    const event = { sender: caption, senderFrame: caption.mainFrame }
+    const status = harness.handlers.get(TITLEBAR_IPC.status)!
+    const control = harness.handlers.get(TITLEBAR_IPC.control)!
+    const menu = harness.handlers.get(TITLEBAR_IPC.menu)!
+    expect(harness.handlers.has(DESKTOP_IPC.windowsMenu)).toBe(false)
+    expect(status(event)).toEqual({ locale: 'en', theme: 'light', maximized: false, messages: {
+      menuBar: en.menuBar, edit: en.edit, windowMinimize: en.windowMinimize, windowMaximize: en.windowMaximize,
+      windowRestore: en.windowRestore, updateClose: en.updateClose,
+    } })
+    const other = new harness.FakeWindow({ show: false })
+    await other.loadURL('dsh-app://shell/titlebar.html')
+    for (const foreign of [
+      { sender: contents, senderFrame: contents.mainFrame },
+      { sender: other.webContents, senderFrame: other.webContents.mainFrame },
+      { sender: caption, senderFrame: { url: caption.mainFrame.url } },
+    ]) {
+      expect(() => status(foreign)).toThrow('rejected sender')
+      expect(() => control(foreign, 'minimize')).toThrow('rejected sender')
+      expect(() => menu(foreign, 'application', 0, 0)).toThrow('rejected sender')
+    }
+    await control(event, 'toggle-maximize')
     expect(window.maximize).toHaveBeenCalledOnce()
-    window.webContents.send.mockClear()
-    window.webContents.emit('did-finish-load')
-    expect(window.webContents.send).toHaveBeenCalledWith(DESKTOP_IPC.windowState, { maximized: true, fullscreen: false })
-    await harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'toggle-maximize')
+    expect(caption.send).toHaveBeenLastCalledWith(TITLEBAR_IPC.changed, expect.objectContaining({ maximized: true }))
+    await control(event, 'toggle-maximize')
     expect(window.unmaximize).toHaveBeenCalledOnce()
-    await harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'minimize')
+    await control(event, 'minimize')
     expect(window.minimize).toHaveBeenCalledOnce()
-    expect(() => harness.handlers.get(DESKTOP_IPC.windowControl)!(event, 'invalid')).toThrow('invalid control')
-    expect(() => harness.handlers.get(DESKTOP_IPC.windowState)!({ ...event, sender: {} })).toThrow('Rejected Platform command')
+    expect(() => control(event, 'invalid')).toThrow('invalid control')
+    const application = menu(event, 'application', 48, 34)
+    expect(harness.menu.mock.lastCall![0]).toEqual(expect.arrayContaining([
+      { label: en.aboutMenu, role: 'about' }, { role: 'quit' },
+    ]))
+    expect(harness.popup.mock.lastCall![0]).toMatchObject({ window, x: 48, y: 34 })
+    harness.popup.mock.lastCall![0].callback!()
+    await application
+    const edit = menu(event, 'edit', 104, 34)
+    const copy = harness.menu.mock.lastCall![0].find(item => item.label === en.copy)!
+    const copyClick = copy.click as () => void
+    copyClick()
+    expect(contents.sendInputEvent.mock.calls).toEqual([
+      [{ type: 'keyDown', keyCode: 'C', modifiers: ['control'] }],
+      [{ type: 'keyUp', keyCode: 'C', modifiers: ['control'] }],
+    ])
+    expect(caption.sendInputEvent).not.toHaveBeenCalled()
+    harness.popup.mock.lastCall![0].callback!()
+    await edit
+    expect(contents.focus).toHaveBeenCalled()
+    harness.nativeTheme.shouldUseDarkColors = true
+    harness.nativeTheme.emit('updated')
+    expect(caption.send).toHaveBeenLastCalledWith(TITLEBAR_IPC.changed, expect.objectContaining({ theme: 'dark' }))
+    harness.ipcOn.mock.calls.find(([channel]) => channel === DESKTOP_IPC.localeChanged)![1](
+      { sender: contents, senderFrame: contents.mainFrame }, 'zh')
+    expect(caption.send).toHaveBeenLastCalledWith(TITLEBAR_IPC.changed, {
+      locale: 'zh-CN', theme: 'dark', maximized: false, messages: {
+        menuBar: zh.menuBar, edit: zh.edit, windowMinimize: zh.windowMinimize, windowMaximize: zh.windowMaximize,
+        windowRestore: zh.windowRestore, updateClose: zh.updateClose,
+      },
+    })
+    expect(contents.send.mock.calls.some(([channel]) => channel === TITLEBAR_IPC.changed)).toBe(false)
+    caption.mainFrame.url = 'dsh-app://shell/update-dialog.html'
+    expect(() => status(event)).toThrow('rejected sender')
+  })
+
+  it('lays out the Linux workspace natively below the titlebar and covers it only in fullscreen', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('linux')
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const view = harness.views[0]!
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: LINUX_TITLEBAR_HEIGHT, width: 900, height: 650 - LINUX_TITLEBAR_HEIGHT })
+    window.getContentBounds.mockReturnValue({ x: 10, y: 20, width: 1200, height: 800 })
+    window.emit('resize')
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 40, width: 1200, height: 760 })
+    window.setFullScreen(true)
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 1200, height: 800 })
+    window.setFullScreen(false)
+    expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 40, width: 1200, height: 760 })
+    window.destroy()
+    expect(view.webContents.close).toHaveBeenCalledExactlyOnceWith({ waitForBeforeUnload: false })
+    expect(view.webContents.isDestroyed()).toBe(true)
+    const layouts = view.setBounds.mock.calls.length
+    window.emit('resize')
+    expect(view.setBounds).toHaveBeenCalledTimes(layouts)
   })
 
   it.each(['darwin'] as const)('adds the product File menu and standard window commands only on macOS (%s)', async (platform) => {
@@ -1111,7 +1213,10 @@ describe('desktop main startup', () => {
     } finally { harness.app.name = originalName }
   })
 
-  it.each(['http:', 'https:'] as const)('attaches %s Host socket credentials only to the owned application origin and window', async (protocol) => {
+  it.each([
+    ['win32', 'http:'], ['win32', 'https:'], ['linux', 'http:'], ['linux', 'https:'],
+  ] as const)('attaches Host socket credentials only to the owned application on %s over %s', async (platform, protocol) => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
     await import('../src/main.ts')
     await harness.preparing.promise
     harness.prepared.resolve()
@@ -1125,15 +1230,19 @@ describe('desktop main startup', () => {
     ) => void
     const callback = vi.fn()
     const socketProtocol = protocol === 'https:' ? 'wss:' : 'ws:'
-    const details = { url: `${socketProtocol}//127.0.0.1:3080/api/remote.mux`, webContentsId: 42, requestHeaders: { Origin: 'dsh-app://app' } }
+    const details = { url: `${socketProtocol}//127.0.0.1:3080/api/remote.mux`, webContentsId: applicationContents().id, requestHeaders: { Origin: 'dsh-app://app' } }
     handler(details, callback)
     expect(callback).toHaveBeenLastCalledWith({ requestHeaders: {
       origin: `${protocol}//127.0.0.1:3080`, cookie: 'test-cookie', 'sec-fetch-site': 'same-origin',
     } })
     handler({ ...details, requestHeaders: { Origin: 'https://other.example' } }, callback)
     expect(callback).toHaveBeenLastCalledWith({ cancel: true })
-    handler({ ...details, webContentsId: 43 }, callback)
+    handler({ ...details, webContentsId: details.webContentsId + 100 }, callback)
     expect(callback).toHaveBeenLastCalledWith({})
+    if (platform === 'linux') {
+      handler({ ...details, webContentsId: harness.windows[0]!.webContents.id }, callback)
+      expect(callback).toHaveBeenLastCalledWith({})
+    }
     handler({ ...details, url: `${socketProtocol}//127.0.0.1:9999/api/remote.mux` }, callback)
     expect(callback).toHaveBeenLastCalledWith({})
     handler({ ...details, url: `${socketProtocol === 'wss:' ? 'ws:' : 'wss:'}//127.0.0.1:3080/api/remote.mux` }, callback)
@@ -1173,17 +1282,20 @@ describe('desktop main startup', () => {
     expect(window.setSize).not.toHaveBeenCalled()
   })
 
-  it('registers the window-owned directory picker during startup and rejects foreign callers', async () => {
+  it.each(['win32', 'linux'] as const)('registers the workspace-owned directory picker and rejects foreign callers on %s', async (platform) => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
     await import('../src/main.ts')
     await harness.preparing.promise
     const window = harness.windows[0]!
-    const handler = harness.handlers.get(DESKTOP_IPC.directoryPick) as (event: IpcMainInvokeEvent) => Promise<string | null>
+    const handler = harness.handlers.get(DESKTOP_IPC.directoryPick)!
     expect(handler).toBeTypeOf('function')
-    const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame } as unknown as IpcMainInvokeEvent
+    const contents = applicationContents()
+    const event = { sender: contents, senderFrame: contents.mainFrame }
     harness.dialog.showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ['/workspace'] })
     await expect(handler(event)).resolves.toBe('/workspace')
     expect(harness.dialog.showOpenDialog).toHaveBeenCalledExactlyOnceWith(window, { properties: ['openDirectory', 'createDirectory'] })
-    window.webContents.mainFrame.url = 'https://other.example/'
+    if (platform === 'linux') await expect(handler({ sender: window.webContents, senderFrame: window.webContents.mainFrame })).rejects.toThrow('unowned renderer')
+    contents.mainFrame.url = 'https://other.example/'
     await expect(handler(event)).rejects.toThrow('unowned renderer')
   })
 
@@ -1193,7 +1305,7 @@ describe('desktop main startup', () => {
     const handler = harness.handlers.get(DESKTOP_IPC.boot)!
     await expect(handler({ senderFrame: { url: 'https://other.example/' } })).rejects.toThrow('unowned renderer')
     let settled = false
-    const boot = Promise.resolve(handler({ senderFrame: { url: 'dsh-app://app/' } })).then((value) => { settled = true; return value })
+    const boot = Promise.resolve(invoke(DESKTOP_IPC.boot)).then((value) => { settled = true; return value })
     await Promise.resolve()
     expect(settled).toBe(false)
     expect(harness.windows[0]!.urls).toEqual(['dsh-app://app/'])
@@ -1343,8 +1455,14 @@ describe('desktop main startup', () => {
       expect(harness.backgroundNotice.markerPath).toBe(join(harness.app.getPath('userData'), 'background-close-confirmed'))
     }
     window.show.mockClear()
-    window.close()
+    const contents = applicationContents()
+    const product = platform === 'linux' ? harness.views[0]! : window
+    const productUrls = [...product.urls]
+    if (platform === 'linux') await invoke(TITLEBAR_IPC.control, 'caption', 'close')
+    else window.close()
     expect(window.isDestroyed()).toBe(false)
+    expect(contents.isDestroyed()).toBe(false)
+    expect(contents.close).not.toHaveBeenCalled()
     expect(window.hide).toHaveBeenCalledOnce()
     expect(host.stop).not.toHaveBeenCalled()
     expect(harness.app.quit).not.toHaveBeenCalled()
@@ -1357,10 +1475,13 @@ describe('desktop main startup', () => {
     harness.app.emit('second-instance')
     expect(window.show).toHaveBeenCalledTimes(2)
     expect(window.urls).toEqual(urls)
+    expect(applicationContents()).toBe(contents)
+    expect(product.urls).toEqual(productUrls)
+    if (platform === 'linux') expect(harness.views).toHaveLength(1)
     expect(harness.hosts).toHaveLength(1)
     // Locale changes relabel the tray together with the application menu.
     const relabels = harness.trays[0]!.setContextMenu.mock.calls.length
-    harness.ipcOn.mock.calls.find(call => call[0] === DESKTOP_IPC.localeChanged)![1]({ sender: window.webContents, senderFrame: window.webContents.mainFrame }, 'zh')
+    harness.ipcOn.mock.calls.find(call => call[0] === DESKTOP_IPC.localeChanged)![1]({ sender: contents, senderFrame: contents.mainFrame }, 'zh')
     expect(harness.trays[0]!.setContextMenu.mock.calls.length).toBe(relabels + 1)
   })
 
@@ -2042,7 +2163,6 @@ describe('desktop main startup', () => {
     const host = await readyForUpdate()
     if (mandatory) await harness.policyBlocked.promise
     const window = harness.windows[0]!
-    const baseline = { leave: window.listenerCount('leave-full-screen'), closed: window.listenerCount('closed') }
     window.fullscreen = true
     window.setFullScreen.mockImplementation(() => {})
     const preparing = harness.prepareUpdate()
@@ -2051,7 +2171,7 @@ describe('desktop main startup', () => {
     await expect(preparing).resolves.toBe(false)
     expect(harness.dialog.showMessageBox).not.toHaveBeenCalled()
     expect(host.stop).not.toHaveBeenCalled()
-    expect(window.listenerCount('leave-full-screen')).toBe(baseline.leave)
+    expect(window.listenerCount('leave-full-screen')).toBe(0)
   })
 
   it('waits for Platform storage cleanup before the installer takes over', async () => {

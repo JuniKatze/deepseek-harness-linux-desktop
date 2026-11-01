@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'">
+    <title></title>
+    <link rel="stylesheet" href="design-platform.css">
+    <link rel="stylesheet" href="titlebar.css">
+    <script src="titlebar.js" defer></script>
+  </head>
+  <body>
+    <div id="titlebar" class="titlebar" data-desktop-titlebar>
+      <div class="menu-bar">
+        <button id="application-menu" class="menu-button" type="button" data-menu="application" aria-haspopup="menu" aria-expanded="false" disabled>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 4.5h10M3 8h10M3 11.5h10" /></svg>
+        </button>
+        <button id="edit-menu" class="menu-button" type="button" data-menu="edit" aria-haspopup="menu" aria-expanded="false" disabled>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3.5 10.8-.5 2.2 2.2-.5 6.6-6.6-1.7-1.7zM9.4 5l1.7 1.7" /></svg>
+        </button>
+      </div>
+      <div id="drag-space" class="drag-space" aria-hidden="true"></div>
+      <div class="window-controls">
+        <button id="minimize" type="button" data-control="minimize" disabled>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5h9" /></svg>
+        </button>
+        <button id="maximize" type="button" data-control="maximize" disabled>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path id="maximize-icon" d="M3.5 3.5h9v9h-9z" /></svg>
+        </button>
+        <button id="close" type="button" data-control="close" disabled>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 4 8 8M12 4l-8 8" /></svg>
+        </button>
+      </div>
+    </div>
+  </body>
+</html>

@@ -76,10 +76,12 @@ export class DesktopPlatformView {
    * @param owner - application window containing the view.
    * @param page - explicit supported Platform page.
    * @param bounds - owned renderer rectangle.
+   * @param ownerContents - 工作区文档；省略时使用原生窗口自己的文档。
    * @returns when loading finishes, or without a document when superseded or the owner closes or navigates.
    * @throws When a shell update prompt blocks admission, including after storage cleanup.
    */
-  async open(owner: PlatformOwner, page: 'usage' | 'top-up', bounds: PlatformBounds): Promise<void> {
+  async open(owner: PlatformOwner, page: 'usage' | 'top-up', bounds: PlatformBounds,
+    ownerContents: PlatformOwner['webContents'] = owner.webContents): Promise<void> {
     if (this.disposed) throw new Error('Platform view disposed')
     if (this.blocked(owner)) throw new Error('Platform view blocked by update prompt')
     this.close()
@@ -92,14 +94,14 @@ export class DesktopPlatformView {
     const navigateOwner = (_event: Electron.Event, _url: string, isInPlace: boolean, isMainFrame: boolean) => {
       if (isMainFrame && !isInPlace) closeOwnedView()
     }
-    owner.webContents.on('did-start-navigation', navigateOwner)
-    owner.webContents.on('render-process-gone', closeOwnedView)
-    owner.webContents.on('destroyed', closeOwnedView)
+    ownerContents.on('did-start-navigation', navigateOwner)
+    ownerContents.on('render-process-gone', closeOwnedView)
+    ownerContents.on('destroyed', closeOwnedView)
     owner.on('closed', closeOwnedView)
     this.releaseOwner = () => {
-      owner.webContents.removeListener('did-start-navigation', navigateOwner)
-      owner.webContents.removeListener('render-process-gone', closeOwnedView)
-      owner.webContents.removeListener('destroyed', closeOwnedView)
+      ownerContents.removeListener('did-start-navigation', navigateOwner)
+      ownerContents.removeListener('render-process-gone', closeOwnedView)
+      ownerContents.removeListener('destroyed', closeOwnedView)
       owner.removeListener('closed', closeOwnedView)
     }
     const partition = account.userId === null ? `dsh-platform-${randomUUID()}`

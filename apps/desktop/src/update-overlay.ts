@@ -35,21 +35,23 @@ export class DesktopUpdateOverlays {
   /**
    * @param parent - Native owner; its caption remains operable.
    * @param preload - Isolated shell preload.
+   * @param ownerContents - 工作区文档；省略时使用原生窗口自己的文档。
+   * @param top - 浮层在窗口内容中的顶边；省略时遵循既有 Windows 标题栏高度。
    * @returns Document attached inside the owner, without showing or activating a native window.
    */
-  create(parent: UpdateOwner, preload: string): DesktopUpdateOverlay {
+  create(parent: UpdateOwner, preload: string, ownerContents: UpdateOwner['webContents'] = parent.webContents,
+    top: () => number = () => process.platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : 0): DesktopUpdateOverlay {
     const view = new WebContentsView({ webPreferences: {
       preload, contextIsolation: true, sandbox: true, nodeIntegration: false, webSecurity: true,
     } })
-    const ownerContents = parent.webContents
     const contents = view.webContents
     const input = this.inputs.get(parent) ?? { revision: 0, active: 0, get blocked() { return this.active > 0 } }
     this.inputs.set(parent, input)
     input.active++; input.revision++
     const resize = (): void => {
       const { width, height } = parent.getContentBounds()
-      const top = process.platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : 0
-      view.setBounds({ x: 0, y: top, width, height: Math.max(0, height - top) })
+      const y = top()
+      view.setBounds({ x: 0, y, width, height: Math.max(0, height - y) })
     }
     const focus = (): void => {
       if (!parent.isDestroyed() && parent.isFocused() && !contents.isDestroyed()) contents.focus()
@@ -58,6 +60,8 @@ export class DesktopUpdateOverlays {
     const destroy = (): void => { if (!contents.isDestroyed()) contents.close({ waitForBeforeUnload: false }) }
     const release = (): void => {
       parent.off('resize', resize)
+      parent.off('enter-full-screen', resize)
+      parent.off('leave-full-screen', resize)
       parent.off('focus', focus)
       parent.off('closed', destroy)
       ownerContents.off('before-input-event', block)
@@ -71,6 +75,8 @@ export class DesktopUpdateOverlays {
     parent.contentView.addChildView(view)
     resize()
     parent.on('resize', resize)
+    parent.on('enter-full-screen', resize)
+    parent.on('leave-full-screen', resize)
     parent.on('focus', focus)
     parent.once('closed', destroy)
     ownerContents.prependListener('before-input-event', block)

@@ -1,9 +1,14 @@
+html,
+body {
+  width: 100%;
+  height: 40px;
+  margin: 0;
+  overflow: hidden;
+}
+
 .titlebar {
-  position: absolute;
-  inset: 0 0 auto;
-  z-index: 1100;
   box-sizing: border-box;
-  height: var(--dsh-linux-titlebar-height, 40px);
+  height: 40px;
   display: flex;
   align-items: stretch;
   overflow: hidden;
@@ -20,7 +25,7 @@
   border-bottom-color: var(--dsw-alias-border-l2);
 }
 
-.menuBar {
+.menu-bar {
   display: flex;
   align-items: center;
   gap: 2px;
@@ -28,10 +33,10 @@
   -webkit-app-region: no-drag;
 }
 
-.menuButton,
-.windowControls button {
+.menu-button,
+.window-controls button {
   width: 32px;
-  height: calc(var(--dsh-linux-titlebar-height, 40px) - 8px);
+  height: 32px;
   flex: none;
   display: grid;
   place-items: center;
@@ -44,8 +49,8 @@
   -webkit-app-region: no-drag;
 }
 
-.menuButton svg,
-.windowControls svg {
+.menu-button svg,
+.window-controls svg {
   width: 15px;
   height: 15px;
   fill: none;
@@ -55,24 +60,24 @@
   stroke-linejoin: round;
 }
 
-.menuButton:hover,
-.menuButton[aria-expanded='true'] {
+.menu-button:hover,
+.menu-button[aria-expanded='true'] {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.menuButton:focus-visible,
-.windowControls button:focus-visible {
+.menu-button:focus-visible,
+.window-controls button:focus-visible {
   outline: 2px solid var(--dsw-alias-state-business-primary);
   outline-offset: -2px;
 }
 
-.dragSpace {
+.drag-space {
   min-width: 18px;
   flex: 1;
 }
 
-.windowControls {
+.window-controls {
   display: flex;
   align-items: center;
   gap: 1px;
@@ -80,25 +85,17 @@
   -webkit-app-region: no-drag;
 }
 
-.windowControls button {
+.window-controls button {
   width: 38px;
   border-radius: 6px;
-  color: var(--dsw-alias-label-secondary);
 }
 
-.windowControls button:hover {
+.window-controls button:hover {
   color: var(--dsw-alias-label-primary);
   background: var(--dsw-alias-interactive-bg-hover);
 }
 
-.windowControls button[data-control='close']:hover {
+.window-controls button[data-control='close']:hover {
   color: #fff;
   background: #d93b45;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .menuButton,
-  .windowControls button {
-    transition: none;
-  }
 }
