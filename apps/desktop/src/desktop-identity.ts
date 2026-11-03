@@ -1,6 +1,13 @@
 /** Linux 并行安装版与官方桌面端共享数据，但使用独立的运行时身份。 */
 
 import { join } from 'node:path'
+import { LINUX_DESKTOP_DISTRIBUTION } from './desktop-distribution.mjs'
+
+/** 设置 Electron userData 所需的最小应用接口。 */
+export interface DesktopUserDataApplication {
+  getPath(name: 'appData'): string
+  setPath(name: 'userData', path: string): void
+}
 
 /**
  * 返回桌面端占用的 Harness profile 目录名。
@@ -10,8 +17,8 @@ import { join } from 'node:path'
  * @param platform - 目标桌面平台。
  * @returns `$DSH_HOME/profiles` 下的稳定目录名。
  */
-export function desktopProfileName(platform: NodeJS.Platform = process.platform): 'desktop' | 'linux-desktop' {
-  return platform === 'linux' ? 'linux-desktop' : 'desktop'
+export function desktopProfileName(platform: NodeJS.Platform = process.platform): 'desktop' | typeof LINUX_DESKTOP_DISTRIBUTION.profileName {
+  return platform === 'linux' ? LINUX_DESKTOP_DISTRIBUTION.profileName : 'desktop'
 }
 
 /**
@@ -22,8 +29,8 @@ export function desktopProfileName(platform: NodeJS.Platform = process.platform)
  * @param platform - 目标桌面平台。
  * @returns 不含 `://` 的协议名。
  */
-export function desktopOpenProtocol(platform: NodeJS.Platform = process.platform): 'dsh' | 'dsh-linux' {
-  return platform === 'linux' ? 'dsh-linux' : 'dsh'
+export function desktopOpenProtocol(platform: NodeJS.Platform = process.platform): 'dsh' | typeof LINUX_DESKTOP_DISTRIBUTION.protocolScheme {
+  return platform === 'linux' ? LINUX_DESKTOP_DISTRIBUTION.protocolScheme : 'dsh'
 }
 
 /**
@@ -48,5 +55,20 @@ export function desktopUserDataDirectory(
   appData: string,
   platform: NodeJS.Platform = process.platform,
 ): string | undefined {
-  return platform === 'linux' ? join(appData, 'DSH Linux Desktop') : undefined
+  return platform === 'linux' ? join(appData, LINUX_DESKTOP_DISTRIBUTION.userDataDirectoryName) : undefined
+}
+
+/**
+ * 在读取任何 Electron 用户数据前应用平台约定的 userData 目录。
+ * @param application - Electron 应用路径接口。
+ * @param platform - 目标桌面平台。
+ * @returns 已设置的目录；其他平台返回 undefined 并保留 Electron 默认值。
+ */
+export function configureDesktopUserData(
+  application: DesktopUserDataApplication,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  const directory = desktopUserDataDirectory(application.getPath('appData'), platform)
+  if (directory !== undefined) application.setPath('userData', directory)
+  return directory
 }

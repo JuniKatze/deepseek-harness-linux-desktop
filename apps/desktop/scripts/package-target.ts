@@ -31,6 +31,7 @@ import { suggestDesktopBuildVersion } from './desktop-build-version-discovery.ts
 import { desktopBuildCommitEnvironment, readDesktopBuildCommit, resolveDesktopBuildCommit } from './desktop-build-commit.mjs'
 import { requireDesktopToolchain } from './desktop-toolchain-preflight.ts'
 import { withMacOSNotarizationProxy } from './macos-notarization-proxy.ts'
+import { LINUX_DESKTOP_DISTRIBUTION } from '../src/desktop-distribution.mjs'
 
 const APP_ROOT = resolve(import.meta.dirname, '..')
 const REPOSITORY_ROOT = resolve(APP_ROOT, '..', '..')
@@ -442,7 +443,7 @@ async function main(): Promise<void> {
   if (success && target.platform === 'linux' && !invocation.directory && !invocation.prepareOnly) {
     const paths = desktopTargetBuildPaths(target.name, environment)
     const output = desktopArtifactOutput(paths, invocation)
-    const prefix = `dsh-desktop-linux-${buildVersion}-linux-`
+    const prefix = `${LINUX_DESKTOP_DISTRIBUTION.debPackageName}-${buildVersion}-linux-`
     const deb = readdirSync(output.directory).find(file => file.startsWith(prefix) && file.endsWith('-unsigned.deb'))
     console.log(`DEB: ${deb === undefined ? output.directory : join(output.directory, deb)}`)
   }

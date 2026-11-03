@@ -9,6 +9,7 @@ import {
   validateDesktopPackageEnvironment,
 } from '../scripts/desktop-package-environment.mjs'
 import { resolveWindowsPackageSettings } from '../scripts/windows-package-settings.mjs'
+import { LINUX_DESKTOP_DISTRIBUTION } from '../src/desktop-distribution.mjs'
 
 const WINDOWS = { platform: 'win32', arch: 'x64' } as const
 const MACOS = { platform: 'darwin', arch: 'arm64' } as const
@@ -139,7 +140,7 @@ describe('Desktop local packaging configuration', () => {
     const local = localLinuxPackageEnvironment(parent)
     expect(local).toEqual({
       PATH: parent.PATH,
-      DSH_DESKTOP_APP_ID: 'io.github.junikatze.dsh-linux-desktop',
+      DSH_DESKTOP_APP_ID: LINUX_DESKTOP_DISTRIBUTION.appId,
       DSH_DESKTOP_UNSIGNED: '1',
     })
     expect(() => { validateDesktopPackageEnvironment(local, LINUX, { unsigned: true }) }).not.toThrow()

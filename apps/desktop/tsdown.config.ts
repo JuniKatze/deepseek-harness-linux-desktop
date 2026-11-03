@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown'
 import { build } from 'vite'
 import { fileURLToPath } from 'node:url'
-import { readFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, readFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { repositoryClientBuildEnvironment, resolveClientBuildEnvironment } from '../../scripts/client-build-environment.ts'
 import { packagedImportsPlugin } from './scripts/desktop-bundle-imports.mjs'
@@ -21,6 +21,11 @@ const mainProcessImports = { packages: new Set(['electron', ...Object.keys(manif
 const preloadImports = { packages: new Set(['electron', 'events', 'timers', 'url']), nodeBuiltins: false }
 
 const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url))
+
+// tsc 只为共享的 JSDoc 模块生成声明；tsdown 从 lib/types 解析相对导入，需要在打包前复制实现。
+mkdirSync(fileURLToPath(new URL('./lib/types', import.meta.url)), { recursive: true })
+copyFileSync(fileURLToPath(new URL('./src/desktop-distribution.mjs', import.meta.url)),
+  fileURLToPath(new URL('./lib/types/desktop-distribution.mjs', import.meta.url)))
 
 /** Use the client environment this build already received, otherwise the repository's own version and commit. */
 const clientEnvironment = resolveClientBuildEnvironment(process.env.DSH_CLIENT_VERSION === undefined
