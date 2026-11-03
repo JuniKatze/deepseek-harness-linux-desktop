@@ -874,9 +874,9 @@ describe('desktop main startup', () => {
     )
     const refreshed = platform !== 'darwin' ? applicationMenuItems()
       : harness.menu.mock.lastCall![0][0]!.submenu as MenuItemConstructorOptions[]
-    expect(refreshed.find(item => item.label === (nextLocale === 'en' ? en.toggleDevToolsMenu : zh.toggleDevToolsMenu))).toMatchObject(
-      platform === 'linux' ? { click: expect.any(Function) } : { role: 'toggleDevTools' },
-    )
+    const refreshedDevTools = refreshed.find(item => item.label === (nextLocale === 'en' ? en.toggleDevToolsMenu : zh.toggleDevToolsMenu))
+    if (platform === 'linux') expect(refreshedDevTools?.click).toBeTypeOf('function')
+    else expect(refreshedDevTools).toMatchObject({ role: 'toggleDevTools' })
     expect(harness.windows[0]!.options).toMatchObject({ webPreferences: { devTools: true } })
   })
 
