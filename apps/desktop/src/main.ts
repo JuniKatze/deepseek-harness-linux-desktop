@@ -76,8 +76,10 @@ import { DesktopUpdateOverlays } from './update-overlay.ts'
 import { DesktopQuitConfirmation } from './quit-confirmation.ts'
 import { DesktopTray } from './tray.ts'
 import { DesktopBackgroundNotice } from './background-notice.ts'
-import { desktopOpenProtocol, desktopOpenUrl, desktopUserDataDirectory } from './desktop-identity.ts'
+import { configureDesktopUserData, desktopOpenProtocol, desktopOpenUrl } from './desktop-identity.ts'
+import { desktopCapabilities } from './desktop-capabilities.ts'
 import { LinuxDesktopFrame, LINUX_TITLEBAR_URL } from './linux-frame.ts'
+import { SingleDocumentMainWindowContent, type DesktopMainWindowContent } from './main-window-content.ts'
 import { TITLEBAR_IPC, type DesktopTitlebarView } from './titlebar-api.ts'
 
 let focusPrimaryWindow = (): void => {}
@@ -88,7 +90,8 @@ let shuttingDown = false
  * development restart command. The installer handoff has its own before-quit branch.
  */
 let skipQuitConfirmation = false
-let windowsLanguage: string | undefined = readDesktopLocaleCache(app.getPath('userData'))
+let windowsLanguage: string | undefined
+const capabilities = desktopCapabilities()
 /**
  * Whether the backend has reached ready: false until the first ready, back to
  * false when a restart returns it to starting, frozen during shutdown so a
@@ -100,12 +103,11 @@ const rendererConsole = new RendererConsoleTail()
 
 // Platform-conventional logs directory (macOS ~/Library/Logs/<name>, otherwise under userData);
 // set before ready so the first fatal report already resolves under it.
-if (process.platform === 'linux' && typeof app.setPath === 'function') {
-  const appData = app.getPath('appData')
-  const userData = desktopUserDataDirectory(appData, process.platform)
-  if (userData !== undefined) app.setPath('userData', userData)
+if (capabilities.shellTitlebar && typeof app.setPath === 'function') {
+  configureDesktopUserData(app)
 }
 app.setAppLogsPath()
+windowsLanguage = readDesktopLocaleCache(app.getPath('userData'))
 
 function currentDesktopLocale(): ReturnType<typeof resolveDesktopLocale> {
   return resolveDesktopLocale(windowsLanguage ?? app.getLocale())
@@ -280,7 +282,7 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     minWidth: 520,
     minHeight: 600,
     show,
-    ...(process.platform === 'linux' && primary ? {
+    ...(capabilities.shellTitlebar && primary ? {
       frame: false,
       autoHideMenuBar: true,
     } : {}),
@@ -306,11 +308,11 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       contextIsolation: true,
       sandbox: true,
       webSecurity: true,
-      webviewTag: primary && process.platform !== 'linux',
+      webviewTag: primary && !capabilities.shellTitlebar,
       devTools: true,
     },
   })
-  if (process.platform !== 'linux' || !primary) configureProductContents(window, window.webContents)
+  if (!primary) configureProductContents(window, window.webContents)
   if (process.platform === 'darwin') {
     // Deminiaturize reattaches the NSVisualEffectView material late
     // (electron/electron#25368), so a transparent window shows the desktop
@@ -418,9 +420,9 @@ async function main(): Promise<void> {
   let startup: Promise<void> | undefined
   let workspaceRecovery: Promise<void> | undefined
   let mainWindow: BrowserWindow | undefined
-  let linuxFrame: LinuxDesktopFrame | undefined
+  let mainWindowContent: DesktopMainWindowContent | undefined
   const productContents = (window: BrowserWindow): WebContents =>
-    window === mainWindow && linuxFrame !== undefined ? linuxFrame.webContents : window.webContents
+    window === mainWindow && mainWindowContent !== undefined ? mainWindowContent.productContents : window.webContents
   const currentProductContents = (): WebContents | undefined =>
     mainWindow === undefined ? undefined : productContents(mainWindow)
   let welcomeWindow: BrowserWindow | undefined
@@ -467,11 +469,11 @@ async function main(): Promise<void> {
     },
   })
   const publishTitlebar = (): void => {
-    if (linuxFrame !== undefined && mainWindow !== undefined) {
-      mainWindow.webContents.send(TITLEBAR_IPC.changed, titlebarView(mainWindow))
+    if (mainWindowContent !== undefined && mainWindow !== undefined) {
+      mainWindowContent.chromeContents.send(TITLEBAR_IPC.changed, titlebarView(mainWindow))
     }
   }
-  if (process.platform === 'linux') {
+  if (capabilities.shellTitlebar) {
     nativeTheme.on('updated', publishTitlebar)
     app.once('will-quit', () => { nativeTheme.off('updated', publishTitlebar) })
   }
@@ -492,8 +494,9 @@ async function main(): Promise<void> {
   const updateOverlays = new DesktopUpdateOverlays()
   const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, {
     create: (parent, preload) => updateOverlays.create(parent, preload,
-      parent === mainWindow && linuxFrame !== undefined ? linuxFrame.webContents : parent.webContents,
-      () => parent === mainWindow && linuxFrame !== undefined ? linuxFrame.top : process.platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : 0),
+      parent === mainWindow && mainWindowContent !== undefined ? mainWindowContent.productContents : parent.webContents,
+      () => parent === mainWindow && mainWindowContent !== undefined
+        ? mainWindowContent.productTop : process.platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : 0),
   })
   const isMandatory = (): boolean => mandatoryPolicy?.state.blocking === true
   const ordinaryMessageBox = async (options: UpdateDialogOptions,
@@ -557,10 +560,8 @@ async function main(): Promise<void> {
     if (navigation?.window === window && navigation.url === url) return navigation.promise
     const next = { window, url, promise: Promise.resolve() }
     next.promise = (async () => {
-      if (linuxFrame !== undefined && window.webContents.getURL() !== LINUX_TITLEBAR_URL) {
-        await window.loadURL(LINUX_TITLEBAR_URL)
-      }
-      await productContents(window).loadURL(url)
+      if (mainWindowContent !== undefined) await mainWindowContent.loadProduct(url)
+      else await window.loadURL(url)
     })().catch((error: unknown) => {
       if (quitting || shuttingDown || window.isDestroyed() || navigation !== next
         || (error instanceof Error && 'code' in error && error.code === 'ERR_ABORTED')) return
@@ -739,7 +740,7 @@ async function main(): Promise<void> {
 
   const manifest: unknown = JSON.parse(await readFile(join(app.getAppPath(), 'package.json'), 'utf8'))
   const packagedChannel = desktopUpdateChannel(manifest)
-  const channelSettings = process.platform === 'linux' ? undefined : new DesktopUpdateSettings(app.getPath('userData'), packagedChannel)
+  const channelSettings = capabilities.updates ? new DesktopUpdateSettings(app.getPath('userData'), packagedChannel) : undefined
   const initialChannel = channelSettings === undefined
     ? { kind: 'ready' as const, channel: packagedChannel } : await channelSettings.load()
   channelState = { channel: initialChannel.kind === 'ready' ? initialChannel.channel : null,
@@ -827,7 +828,6 @@ async function main(): Promise<void> {
     // A confirmation on a hidden window would go unseen, so it waits for the next show; the mandatory
     // flow keeps its own taskbar and Dock attention instead.
     if (!isMandatory()) await windowShown()
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A quit can begin while the show is awaited.
     if (quitting) return state
     return updates.install(version, revision)
   }
@@ -908,13 +908,15 @@ async function main(): Promise<void> {
   }
   const assertTitlebar = (event: IpcMainInvokeEvent): BrowserWindow => {
     const window = mainWindow
-    if (linuxFrame === undefined || window === undefined || event.sender !== window.webContents
-      || event.senderFrame !== window.webContents.mainFrame || event.senderFrame.url !== LINUX_TITLEBAR_URL) {
+    const content = mainWindowContent
+    if (content === undefined || window === undefined || content.chromeContents === content.productContents
+      || event.sender !== content.chromeContents
+      || event.senderFrame !== content.chromeContents.mainFrame || event.senderFrame.url !== LINUX_TITLEBAR_URL) {
       throw new Error('desktop titlebar: rejected sender')
     }
     return window
   }
-  if (process.platform === 'linux') {
+  if (capabilities.shellTitlebar) {
     ipcMain.handle(TITLEBAR_IPC.status, event => titlebarView(assertTitlebar(event)))
     ipcMain.handle(TITLEBAR_IPC.control, (event, action: unknown) => {
       const window = assertTitlebar(event)
@@ -938,13 +940,13 @@ async function main(): Promise<void> {
     const owner = assertMainApplication(event)
     if (page !== 'usage' && page !== 'top-up') throw new Error('Invalid Platform page')
     const rectangle = platformBounds(bounds)
-    rectangle.y += linuxFrame?.top ?? 0
+    rectangle.y += mainWindowContent?.productTop ?? 0
     return platformView.open(owner, page, rectangle, productContents(owner))
   })
   ipcMain.handle(PLATFORM_IPC.bounds, (event, bounds: unknown) => {
     assertMainApplication(event)
     const rectangle = platformBounds(bounds)
-    rectangle.y += linuxFrame?.top ?? 0
+    rectangle.y += mainWindowContent?.productTop ?? 0
     platformView.setBounds(rectangle)
   })
   ipcMain.handle(PLATFORM_IPC.close, (event) => { assertMainApplication(event); platformView.close() })
@@ -1203,7 +1205,7 @@ async function main(): Promise<void> {
   }
 
   const automaticCheck = (): void => {
-    if (!quitting && process.platform !== 'linux') {
+    if (!quitting && capabilities.updates) {
       void mandatoryPolicy?.check('foreground-or-resume').catch((error: unknown) => { console.error(error) })
       void updateSchedule.check().catch((error: unknown) => { console.error(error) })
     }
@@ -1245,14 +1247,15 @@ async function main(): Promise<void> {
         click: () => { void showAbout().catch((error: unknown) => { console.error(error) }) } }
       : { label: currentDesktopLocale().messages.aboutMenu, role: 'about' },
     { type: 'separator' },
-    ...process.platform === 'linux'
-      ? []
-      : [{ label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } }],
-    ...process.platform === 'darwin' || process.platform === 'win32'
-      ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }] : [],
+    ...capabilities.updates
+      ? [{ label: currentDesktopLocale().messages.checkUpdatesMenu, click: () => { void openUpdatePrompt(true) } }]
+      : [],
+    ...capabilities.commandManager
+      ? [{ label: currentDesktopLocale().messages.cliCommandMenu, click: () => { void commandManager.show() } }]
+      : [],
     { type: 'separator' },
     ...development ? [
-      { label: currentDesktopLocale().messages.reloadPageMenu, ...(process.platform === 'linux'
+      { label: currentDesktopLocale().messages.reloadPageMenu, ...(capabilities.shellTitlebar
         ? { click: () => { currentProductContents()?.reload() } } : { role: 'reload' as const }) },
       { label: currentDesktopLocale().messages.restartAppHostMenu, click: () => {
         if (quitting) return
@@ -1260,7 +1263,7 @@ async function main(): Promise<void> {
         quitWithoutConfirmation()
       } },
     ] : [],
-    { ...process.platform === 'linux'
+    { ...capabilities.shellTitlebar
       ? { click: () => { currentProductContents()?.toggleDevTools() } } : { role: 'toggleDevTools' as const },
     label: currentDesktopLocale().messages.toggleDevToolsMenu },
     { type: 'separator' },
@@ -1274,19 +1277,19 @@ async function main(): Promise<void> {
     devToolsF12Shortcut,
   ]
   const refreshApplicationMenu = (): void => {
-    // Linux 标题栏通过原生弹出菜单提供命令，不安装持久菜单栏。
-    Menu.setApplicationMenu(process.platform === 'linux' ? null : Menu.buildFromTemplate(process.platform === 'win32'
+    // 独立壳标题栏通过原生弹出菜单提供命令，不安装持久菜单栏。
+    Menu.setApplicationMenu(capabilities.persistentApplicationMenu ? Menu.buildFromTemplate(process.platform === 'win32'
       ? windowsDevToolsShortcuts : [{
         label: darwin ? app.name : currentDesktopLocale().messages.application,
         submenu: [...applicationItems(), devToolsF12Shortcut],
-      }, ...platformMenus()]))
+      }, ...platformMenus()]) : null)
     tray?.relabel()
   }
   refreshApplicationMenu()
   const trayIconPath = process.platform === 'linux'
     ? development ? join(app.getAppPath(), 'resources', 'linux-icons', '48x48.png') : join(process.resourcesPath, 'tray.png')
     : development ? join(app.getAppPath(), 'resources', 'tray-windows.ico') : join(process.resourcesPath, 'tray.ico')
-  if (process.platform === 'win32' || process.platform === 'linux') {
+  if (capabilities.tray) {
     // The tray is the way back to a hidden window; without it, relaunching the application still focuses it.
     try {
       tray = new DesktopTray({ iconPath: trayIconPath, locale: currentDesktopLocale,
@@ -1340,7 +1343,7 @@ async function main(): Promise<void> {
       })
     })
   }
-  if (process.platform === 'linux') {
+  if (capabilities.shellTitlebar) {
     ipcMain.handle(TITLEBAR_IPC.menu, (event, name: unknown, x: unknown, y: unknown) =>
       openCaptionMenu(assertTitlebar(event), event, name, x, y))
   }
@@ -1369,21 +1372,23 @@ async function main(): Promise<void> {
     }
   }
   const createMainWindow = (): BrowserWindow => {
-    const window = createWindow(process.platform === 'linux'
+    const window = createWindow(capabilities.shellTitlebar
       ? fileURLToPath(new URL('./preload-titlebar.cjs', import.meta.url)) : appPreload, false, true)
     mainWindow = window
-    if (process.platform === 'linux') {
-      linuxFrame = new LinuxDesktopFrame(window, appPreload)
-      configureProductContents(window, linuxFrame.webContents)
+    mainWindowContent = capabilities.shellTitlebar
+      ? new LinuxDesktopFrame(window, appPreload)
+      : new SingleDocumentMainWindowContent(window)
+    configureProductContents(window, mainWindowContent.productContents)
+    if (mainWindowContent.chromeContents !== mainWindowContent.productContents) {
       window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
       window.webContents.on('will-navigate', (event, url) => { if (url !== LINUX_TITLEBAR_URL) event.preventDefault() })
       window.on('maximize', publishTitlebar)
       window.on('unmaximize', publishTitlebar)
     }
-    const contents = productContents(window)
-    if (process.platform === 'linux') {
+    const contents = mainWindowContent.productContents
+    if (capabilities.shellTitlebar) {
       window.on('focus', () => { shortcuts.focusProduct() })
-      for (const source of [contents, window.webContents]) source.on('before-input-event', (_event, input) => {
+      for (const source of [contents, mainWindowContent.chromeContents]) source.on('before-input-event', (_event, input) => {
         if (input.type === 'keyDown' && input.key === 'F12') contents.toggleDevTools()
       })
       contents.on('page-title-updated', (_event, title) => { window.setTitle(title) })
@@ -1395,7 +1400,7 @@ async function main(): Promise<void> {
     window.on('close', (event) => {
       if (quitting || shellInstallerOwnsQuit || sessionEnding) return
       event.preventDefault()
-      if (process.platform === 'linux' && tray === undefined) {
+      if (capabilities.tray && tray === undefined) {
         // 托盘创建失败时走普通退出确认，避免窗口隐藏后失去恢复入口。
         app.quit()
         return
@@ -1417,8 +1422,8 @@ async function main(): Promise<void> {
       window.on('focus', () => { sessionEnding = false })
       window.on('show', () => { sessionEnding = false })
     }
-    window.on('closed', () => { if (mainWindow === window) { mainWindow = undefined; linuxFrame = undefined } })
-    for (const contents of new Set([productContents(window), window.webContents])) {
+    window.on('closed', () => { if (mainWindow === window) { mainWindow = undefined; mainWindowContent = undefined } })
+    for (const contents of new Set([mainWindowContent.productContents, mainWindowContent.chromeContents])) {
       contents.on('console-message', (details) => {
         if (details.level !== 'error') return
         rendererConsole.push(`${details.sourceId}:${String(details.lineNumber)} ${details.message}`)

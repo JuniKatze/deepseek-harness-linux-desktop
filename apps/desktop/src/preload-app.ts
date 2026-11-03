@@ -13,6 +13,7 @@ import {
 import { PLATFORM_IPC } from './platform-ipc.ts'
 import { markDocumentPlatform, syncWindowFullscreen } from './preload-platform.ts'
 import { syncNativeTheme } from './preload-theme.ts'
+import { desktopCapabilities } from './desktop-capabilities.ts'
 import { syncWindowsAppearance } from './preload-windows.ts'
 import { installMandatoryUpdateOverlay } from './preload-mandatory-overlay.ts'
 import { createDesktopBrowserBridge } from './preload-browser.ts'
@@ -71,7 +72,7 @@ function createProductApi(): DshDesktopProductApi {
       },
     },
     updates: {
-      ...process.platform === 'linux' ? {} : { channels: {
+      ...desktopCapabilities().updates ? { channels: {
         get: () => ipcRenderer.invoke(DESKTOP_IPC.updatesChannelGet) as Promise<DesktopChannelState>,
         set: channel => ipcRenderer.invoke(DESKTOP_IPC.updatesChannelSet, channel) as Promise<DesktopChannelChangeResult>,
         subscribe(listener) {
@@ -79,7 +80,7 @@ function createProductApi(): DshDesktopProductApi {
           ipcRenderer.on(DESKTOP_IPC.updatesChannelChanged, handle)
           return () => { ipcRenderer.off(DESKTOP_IPC.updatesChannelChanged, handle) }
         },
-      } },
+      } } : {},
       status: () => ipcRenderer.invoke(DESKTOP_IPC.updatesStatus) as Promise<DesktopUpdatePresentation>,
       open: () => ipcRenderer.invoke(DESKTOP_IPC.updatesOpen) as Promise<void>,
       subscribe(listener) {

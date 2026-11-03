@@ -1,0 +1,22 @@
+# Bilingual-pair consistency record for 2026-11-04-community-linux-desktop-boundary.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/architecture/2026-11-04-community-linux-desktop-boundary.md
+/agent-note-community-linux-desktop-boundary:
+  en: b2905d1d6883ab43
+  zh: ad6e322aaf1ed4f0
+/agent-note-community-linux-desktop-boundary/problem:
+  en: f5e72261d44c8f8f
+  zh: efd93acf8e9be4e0
+/agent-note-community-linux-desktop-boundary/decision:
+  en: fff11955d917792f
+  zh: 310624ce769c9bd5
+/agent-note-community-linux-desktop-boundary/alternatives-considered:
+  en: 2e18bf7e39d4f27c
+  zh: b942e02c5b76ecef
+/agent-note-community-linux-desktop-boundary/consequences:
+  en: 51374151d1ace36c
+  zh: a695077c75397789
+/agent-note-community-linux-desktop-boundary/testing:
+  en: 709adb7c774b34e7
+  zh: 776ff66e72c894ec

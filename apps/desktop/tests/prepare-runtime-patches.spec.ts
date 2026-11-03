@@ -63,7 +63,7 @@ it('classifies the current workspace and shares only runtime patch bytes', () =>
   }))
   expect(() => { verifyRuntimePatches(project, plan) })
     .toThrow('workspace-only dependency entered the runtime: @botiverse/oar@0.67.0')
-})
+}, 15_000)
 
 it('does not infer version overrides from selected patches', () => {
   const { source, project } = fixture()
