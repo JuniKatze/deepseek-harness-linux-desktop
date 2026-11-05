@@ -496,7 +496,7 @@ async function main(): Promise<void> {
   const updateDialog = new DesktopUpdateDialog(fileURLToPath(new URL('./preload-update-dialog.cjs', import.meta.url)), () => locale, {
     create: (parent, preload) => updateOverlays.create(parent, preload,
       parent === mainWindow && mainWindowContent !== undefined ? mainWindowContent.productContents : parent.webContents,
-      () => parent === mainWindow && mainWindowContent !== undefined
+      () => capabilities.shellTitlebar && parent === mainWindow && mainWindowContent !== undefined
         ? mainWindowContent.productTop : process.platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : 0),
   })
   const isMandatory = (): boolean => mandatoryPolicy?.state.blocking === true

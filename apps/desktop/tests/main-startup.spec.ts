@@ -13,6 +13,7 @@ import { MANDATORY_IPC } from '../src/mandatory-update-ipc.ts'
 import { DesktopHostFatalError, DesktopHostUncleanExitError } from '../src/host-process.ts'
 import { en, zh } from '../src/locale.ts'
 import { DesktopUpdatePreparationError } from '../src/update-error.ts'
+import type { DesktopUpdateOverlays } from '../src/update-overlay.ts'
 import { writeCrashReport } from '../src/crash-report.ts'
 import { runOperationReportJob } from '../src/operation-report-job.ts'
 
@@ -220,10 +221,11 @@ const harness = await vi.hoisted(async () => {
   }
   const backgroundNotice = { close: vi.fn((hide: () => void) => { hide() }), dispose: vi.fn(), markerPath: undefined as string | undefined }
   const shellDialog = { isOpen: false, focus: vi.fn() }
+  const dialogOverlays: { value?: Pick<DesktopUpdateOverlays, 'create'> } = {}
   return {
     failWindow(error: Error) { windowFailure = error },
     windows, views, hosts, handlers, app, FakeWindow, FakeView, FakeHost, powerMonitor, nativeTheme, analytics,
-    trays, FakeTray, backgroundNotice, shellDialog,
+    trays, FakeTray, backgroundNotice, shellDialog, dialogOverlays,
     menu, popup, socketHeaders: vi.fn(), connectWelcome: vi.fn(), removeLegacyHostCookies: vi.fn(async () => {}), hostCookies: {},
     loginShell, readLoginShell, updateCheck, updateDownload, updateInstall,
     platformDispose,
@@ -276,6 +278,7 @@ const harness = await vi.hoisted(async () => {
       trays.length = 0
       backgroundNotice.markerPath = undefined
       shellDialog.isOpen = false
+      delete dialogOverlays.value
       powerMonitor.removeAllListeners()
       nativeTheme.removeAllListeners()
       nextContentsId = 42
@@ -368,6 +371,9 @@ vi.mock('../src/host-process.ts', async importOriginal => ({
   ...await importOriginal<typeof import('../src/host-process.ts')>(), DesktopHostProcess: harness.FakeHost,
 }))
 vi.mock('../src/update-dialog.ts', () => ({ DesktopUpdateDialog: class {
+  constructor(_preload: string, _locale: unknown, overlays: Pick<DesktopUpdateOverlays, 'create'>) {
+    harness.dialogOverlays.value = overlays
+  }
   get isOpen() { return harness.shellDialog.isOpen }
   input() { return { revision: 0, blocked: false } }
   show(owner: { options: { modal?: boolean } }, options: unknown) {
@@ -1224,6 +1230,25 @@ describe('desktop main startup', () => {
       expect(view.webContents.insertCSS).not.toHaveBeenCalled()
     }
     expect(harness.hosts).toHaveLength(0)
+  })
+
+  it.each(['darwin', 'win32', 'linux'] as const)('preserves caption clearance through the main dialog factory on %s', async (platform) => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue(platform)
+    await import('../src/main.ts')
+    await harness.preparing.promise
+    const window = harness.windows[0]!
+    const overlay = harness.dialogOverlays.value!.create(window, 'isolated-preload')
+    try {
+      const view = harness.views.at(-1)!
+      const top = platform === 'win32' ? WINDOWS_TITLEBAR_HEIGHT : platform === 'linux' ? LINUX_TITLEBAR_HEIGHT : 0
+      expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: top, width: 900, height: 650 - top })
+      if (platform === 'linux') {
+        window.setFullScreen(true)
+        expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: 0, width: 900, height: 650 })
+        window.setFullScreen(false)
+        expect(view.setBounds).toHaveBeenLastCalledWith({ x: 0, y: LINUX_TITLEBAR_HEIGHT, width: 900, height: 650 - LINUX_TITLEBAR_HEIGHT })
+      }
+    } finally { overlay.destroy() }
   })
 
   it('serves packaged shell documents instead of rejecting the shell origin', async () => {
