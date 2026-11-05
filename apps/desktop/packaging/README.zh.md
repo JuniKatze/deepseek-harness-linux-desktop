@@ -100,7 +100,7 @@ pnpm run package:desktop:linux:x64
 
 macOS arm64 命令要求 Apple Silicon。macOS x64 命令可以在 Intel macOS 或带 Rosetta 的 Apple Silicon 上运行。Windows x64 命令要求 Windows x64。`linux-x64` 要求 Linux x64 构建宿主，当前面向 Debian 12 或 13 的 amd64。
 
-Linux 命令是本地未签名 `.deb` 构建。产物写入 `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，不读取更新或签名凭据，不发布，也不嵌入更新 feed 或强制更新策略。安装包名为 `dsh-desktop-linux`，把应用放在 `/opt/DSH Linux Desktop/` 并提供 `dsh-linux-desktop`；升级保留该包名，不增加 GUI 命令链接管理。应用与其他 Harness 进程共享 `$DSH_HOME/sessions`、凭证和其他产品数据，但独占 `$DSH_HOME/profiles/linux-desktop`，不会迁移或修改其他 profile。Linux 版的 Electron 用户数据（包括窗口设置、Cookie、缓存和单实例锁）位于 `$XDG_CONFIG_HOME/DSH Linux Desktop`，默认即 `~/.config/DSH Linux Desktop`。Linux Office 转换使用随包提供的 WASM 引擎。使用 `package:desktop:linux:x64:dir` 可以停在经过验证的 `linux-unpacked` 应用目录。
+Linux 命令是本地未签名 `.deb` 构建。产物写入 `apps/desktop/.desktop-build/targets/linux-x64/unsigned-artifacts/`，不读取更新或签名凭据，不发布，也不嵌入更新 feed 或强制更新策略。安装包名为 `dsh-desktop-linux`，把应用放在 `/opt/DSH Linux Desktop/` 并提供 `dsh-linux-desktop`；升级保留该包名，不增加 GUI 命令链接管理。应用与其他 Harness 进程共享 `$DSH_HOME/sessions`、凭证和其他产品数据，但独占 `$DSH_HOME/profiles/linux-desktop`，不会迁移或修改其他 profile。Linux 版的 Electron 用户数据（包括窗口设置、Cookie、缓存和单实例锁）位于 `$XDG_CONFIG_HOME/DSH Linux Desktop`，默认即 `~/.config/DSH Linux Desktop`。Linux Office 转换使用随包提供的 WASM 引擎。使用 `package:desktop:linux:x64:dir` 可以停在经过验证的 `linux-unpacked` 应用目录。使用 `--build-version auto` 时，Linux 按该输出目录中已有的未签名 `.deb` 产物编号，识别社区包名和 Debian 的 `amd64` 架构名。
 
 Linux 启动器图标来自 `apps/desktop/resources/linux-icons/` 的标准尺寸集合，并安装到 `hicolor` 的 `16` 至 `1024` 像素目录。不要改回单张非标准尺寸 PNG，否则 Deepin 等启动器可能无法解析图标。
 

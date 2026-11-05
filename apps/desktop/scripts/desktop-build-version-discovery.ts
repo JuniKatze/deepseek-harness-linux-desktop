@@ -23,6 +23,7 @@ import { desktopBuildVersionPrefix, validateDesktopBuildVersion } from './deskto
 import { DESKTOP_AUTO_UPDATE_ENV, resolveDesktopUploadConfig } from './desktop-auto-update-environment.mjs'
 import { createDesktopCos, DESKTOP_COS_REGION } from './desktop-cos.ts'
 import type { DesktopPackageTargetName } from './package-target.ts'
+import { LINUX_DESKTOP_DISTRIBUTION } from '../src/desktop-distribution.mjs'
 
 /** How long the whole bucket listing may take before the suggestion falls back to local artifacts. */
 const LISTING_DEADLINE_MS = 8_000
@@ -32,6 +33,9 @@ const LISTING_PAGE_SIZE = 1000
 
 /** Artifact name electron-builder writes for one build, on either platform; unsigned and unnotarized builds add a suffix. */
 const ARTIFACT = /(?:^|\/)deepseek-harness-(?<version>.+)-(?:mac|win|linux)-(?:arm64|x64)(?:-unsigned|-unnotarized)?\.(?:exe|dmg|zip|deb)$/u
+
+/** Debian 产物去除发行包名前缀后，使用 amd64 架构名和未签名后缀。 */
+const LINUX_ARTIFACT = /^(?<version>.+)-linux-amd64-unsigned\.deb$/u
 
 /** Inputs that decide which versions are already taken. */
 export interface DesktopBuildVersionSuggestionOptions {
@@ -77,8 +81,12 @@ function sequenceNumbers(versions: Iterable<string>, prefix: string): number[] {
  */
 async function localVersions(artifactsRoot: string): Promise<string[]> {
   const entries = await readdir(artifactsRoot).catch(() => [])
-  return entries.map(entry => ARTIFACT.exec(entry)?.groups?.version)
-    .filter((version): version is string => version !== undefined && parse(version) !== null)
+  const linuxPrefix = `${LINUX_DESKTOP_DISTRIBUTION.debPackageName}-`
+  return entries.map((entry) => {
+    const match = entry.startsWith(linuxPrefix)
+      ? LINUX_ARTIFACT.exec(entry.slice(linuxPrefix.length)) : ARTIFACT.exec(entry)
+    return match?.groups?.version
+  }).filter((version): version is string => version !== undefined && parse(version) !== null)
 }
 
 /**

@@ -7,6 +7,8 @@ import {
   suggestDesktopBuildVersion,
 } from '../scripts/desktop-build-version-discovery.ts'
 
+import { LINUX_DESKTOP_DISTRIBUTION } from '../src/desktop-distribution.mjs'
+
 const PRERELEASE = '0.1.6-alpha.2'
 const STABLE = '0.1.6'
 const DATE = '20260921'
@@ -60,6 +62,23 @@ describe('desktop build version discovery', () => {
     ])
     await expect(suggestDesktopBuildVersion({ productVersion: PRERELEASE, target: 'win-x64', environment: {}, date: DATE, artifactsRoot }))
       .resolves.toBe(`${PRERELEASE}.${DATE}.1`)
+  })
+
+  it.each([
+    [PRERELEASE, `${PRERELEASE}.${DATE}`],
+    [STABLE, `${STABLE}-test.${DATE}`],
+  ])('numbers after Linux Debian artifacts for %s', async (productVersion, prefix) => {
+    const packageName = LINUX_DESKTOP_DISTRIBUTION.debPackageName
+    const artifactsRoot = await artifactsWith([
+      `${packageName}-${prefix}.2-linux-amd64-unsigned.deb`,
+      `${packageName}-${prefix}.6-linux-amd64-unsigned.deb`,
+      `${packageName}-${prefix}.9-linux-amd64-unsigned.deb.sha256`,
+      `${packageName}-${productVersion}.20260920.15-linux-amd64-unsigned.deb`,
+      `unrelated-${prefix}.99-linux-amd64-unsigned.deb`,
+    ])
+    await expect(suggestDesktopBuildVersion({
+      productVersion, target: 'linux-x64', environment: { DSH_DESKTOP_AUTO_UPDATE_ENV: 'invalid' }, date: DATE, artifactsRoot,
+    })).resolves.toBe(`${prefix}.7`)
   })
 
   it('reads macOS artifact names too', async () => {
