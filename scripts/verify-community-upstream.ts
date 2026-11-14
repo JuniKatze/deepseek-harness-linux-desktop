@@ -1,6 +1,6 @@
 /**
  * 固定发布版社区源码校验：只读 index 和工作树，不依赖 tag 对象、网络或构建产物。
- * 更新基线必须显式选择发布版本，同时更新树哈希、提交和 EOF 例外；不跟随分支。
+ * 更新基线必须显式选择发布版本，同时更新树哈希和 EOF 例外；不跟随分支。
  * whitespace 仍由原始 git diff --cached --check 判定；仅在五树和特定 blob 均精确
  * 一致时，将上游已有的单个 EOF 空行诊断纠正为接受，其他诊断及 Git 失败均保留。
  */
@@ -13,7 +13,6 @@ import { dirname, join, resolve } from 'node:path'
 /** 固定发布版的完整 Git 树及唯一允许的上游 EOF 空行；不接受 CLI 或环境覆盖。 */
 export const COMMUNITY_UPSTREAM = {
   release: 'dsh-v0.2.2-rc.3',
-  commit: '38a6a5c965aa99ab525161efb7cc5cf1fe62fced',
   trees: {
     packages: '9bd05dac849733c1a5538a0af14f3dad99c1e0f9',
     vendor: '721abc98e443b0d2cff281cd0e900bac05b3bcd4',

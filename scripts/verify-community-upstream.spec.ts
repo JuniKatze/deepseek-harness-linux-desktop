@@ -92,7 +92,7 @@ function fixture(restoreEof = true): Fixture {
     'packages/a/source.ts': 'nested\n',
     'packages/a0': 'file after directory\n',
     'packages/多字节/source.ts': 'unicode\n',
-    'vendor/cordis/index.ts': 'export const vendor = true\n',
+    'vendor/framework/index.ts': 'export const vendor = true\n',
     'apps/cli/src/index.ts': 'export const cli = true\n',
     'apps/desktop-host/src/index.ts': 'export const desktop = true\n',
     'apps/web/src/index.ts': 'export const web = true\n',
@@ -138,9 +138,9 @@ function parallelCheck(fixture: Fixture): Promise<Result> {
 }
 
 describe('固定发布版社区源码与 whitespace 校验', () => {
-  it('保留五棵完整树、固定提交和唯一 EOF blob 的发布基线', () => {
+  it('保留五棵完整树、发布标签和唯一 EOF blob 的发布基线', () => {
     expect(COMMUNITY_UPSTREAM).toEqual({
-      release: 'dsh-v0.2.2-rc.3', commit: '38a6a5c965aa99ab525161efb7cc5cf1fe62fced',
+      release: 'dsh-v0.2.2-rc.3',
       trees: { packages: '9bd05dac849733c1a5538a0af14f3dad99c1e0f9', vendor: '721abc98e443b0d2cff281cd0e900bac05b3bcd4', 'apps/cli': 'd0ff23c88f4f18b3e5102921bdff74f5fc99cb3d', 'apps/desktop-host': '41cea339d960cb3b285f186e54507579d1b1b1e6', 'apps/web': '957d36696ae6cc69f1f4a7ff69228b9825f99b3a' },
       eof: { path: 'packages/experimental/deepseek-chat-import/src/client/mount.ts', blob: '99e8a44407707c73ed8d9bbdfbefbb808cc895e8', line: 65 },
     })
@@ -361,8 +361,8 @@ describe('固定发布版社区源码与 whitespace 校验', () => {
   it.skipIf(process.platform === 'win32')('校验符号链接原字节且拒绝父目录链接（Windows 需额外链接权限）', () => {
     const f = fixture(false)
     const path = 'vendor/link'
-    symlinkSync('cordis/index.ts', join(f.root, path))
-    stage(f, path, 'cordis/index.ts', '120000')
+    symlinkSync('framework/index.ts', join(f.root, path))
+    stage(f, path, 'framework/index.ts', '120000')
     const tree = git(f, ['write-tree'])
     f.trees.vendor = git(f, ['rev-parse', `${tree}:vendor`])
     setHead(f)
@@ -371,7 +371,7 @@ describe('固定发布版社区源码与 whitespace 校验', () => {
     symlinkSync('elsewhere', join(f.root, path))
     expectRejected(check(f), 'worktree vendor')
     rmSync(join(f.root, path))
-    symlinkSync('cordis/index.ts', join(f.root, path))
+    symlinkSync('framework/index.ts', join(f.root, path))
     const parent = join(f.root, 'packages/core')
     renameSync(parent, join(f.root, 'saved-core'))
     symlinkSync(join(f.root, 'saved-core'), parent, 'dir')
