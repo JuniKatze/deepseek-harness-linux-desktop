@@ -41,6 +41,7 @@ const state = await vi.hoisted(async () => {
     closeWelcome: vi.fn(),
     welcomeLocale: undefined as DesktopLocale | undefined,
     preference: 'zh',
+    themePreference: 'system',
     hasApiKey: false,
     handlers: new Map<string, (...args: unknown[]) => unknown>(),
     listeners: new Map<string, (...args: unknown[]) => void>(),
@@ -168,6 +169,7 @@ vi.mock('../src/host-process.ts', async importOriginal => ({
     fetch() {
       return Promise.resolve(Response.json({
         loggedIn: false, hasApiKey: state.hasApiKey, writable: true, localePreference: state.preference,
+        themePreference: state.themePreference,
       }))
     }
   },
@@ -178,7 +180,8 @@ vi.mock('../src/welcome-backend.ts', () => ({
     readLocalePreference: async () => state.preference,
     read: async () => {
       await state.beforeRead()
-      return { loggedIn: false, hasApiKey: state.hasApiKey, writable: true, localePreference: state.preference }
+      return { loggedIn: false, hasApiKey: state.hasApiKey, writable: true,
+        localePreference: state.preference, themePreference: state.themePreference }
     },
     save: async () => ({ ok: true }),
     account: {
@@ -230,6 +233,7 @@ it.each([['linux', false], ['darwin', false], ['win32', false], ['win32', true]]
     vi.clearAllMocks()
     state.userData = mkdtempSync(join(tmpdir(), 'dsh-welcome-startup-'))
     state.preference = 'zh'
+    state.themePreference = updated ? 'dark' : 'light'
     state.hasApiKey = false
     state.operations = undefined
     state.accountState.mockResolvedValue({ status: 'signed-out', attempt: null, links: { usageUrl: '', topUpUrl: '' } })
@@ -250,7 +254,10 @@ it.each([['linux', false], ['darwin', false], ['win32', false], ['win32', true]]
     const reading = Promise.withResolvers<undefined>()
     const loading = Promise.withResolvers<undefined>()
     state.beforeRead.mockReturnValueOnce(reading.promise)
-    state.beforeWelcome.mockReturnValueOnce(loading.promise)
+    state.beforeWelcome.mockImplementationOnce(async () => {
+      expect(state.nativeTheme.themeSource).toBe(state.themePreference)
+      await loading.promise
+    })
     const activate = () => {
       state.appListeners.get('second-instance')!()
       state.appListeners.get('open-url')!({ preventDefault: vi.fn() },

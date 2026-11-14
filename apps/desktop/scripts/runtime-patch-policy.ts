@@ -9,7 +9,7 @@ export type DesktopRuntimePatch =
 /** Every workspace patch requires an explicit Desktop decision; runtime-only entries may add or replace a patch. */
 export const DESKTOP_RUNTIME_PATCHES: Readonly<Record<string, DesktopRuntimePatch>> = {
   '@botiverse/oar@0.67.0': { scope: 'workspace-only', reason: 'Patched OAR adapters are embedded in the provider bundle.' },
-  '@deepseek-ai/libreoffice-kit@0.1.5': {
+  '@deepseek-ai/libreoffice-kit@0.2.3': {
     scope: 'shared',
     reason: 'Linux must fall back to WASM when Electron ASAR reports a missing optional native engine as null.',
   },

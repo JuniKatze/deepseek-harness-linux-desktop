@@ -4,7 +4,7 @@
 
 ## English
 
-This repository is a community fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It adds an unofficial Electron desktop package for Debian Linux. It is not affiliated with, endorsed by, or published by DeepSeek.
+This repository is a community fork of [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness). It adds an unofficial Electron desktop package for Debian Linux. It is not affiliated with, endorsed by, or published by DeepSeek. The current upstream base is the released `dsh-v0.2.2-rc.3` tag; this branch follows released versions, not later commits on upstream `master`.
 
 ### Supported system
 
@@ -60,7 +60,7 @@ The verified `.deb` is written under `apps/desktop/.desktop-build/targets/linux-
 
 ## 中文说明
 
-本仓库是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的社区分叉，增加非官方 Debian Linux Electron 桌面安装包。它不是 DeepSeek 官方发行，也不代表 DeepSeek 的认可或支持。
+本仓库是 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) 的社区分叉，增加非官方 Debian Linux Electron 桌面安装包。它不是 DeepSeek 官方发行，也不代表 DeepSeek 的认可或支持。当前上游基线是已发布的 `dsh-v0.2.2-rc.3` 标签；本分支只跟随发布版本，不同步上游 `master` 上的后续提交。
 
 ### 支持范围
 

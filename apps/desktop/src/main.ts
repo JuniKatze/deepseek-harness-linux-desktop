@@ -254,9 +254,10 @@ function developmentHostInspectPort(enabled: boolean): number | undefined {
 /**
  * Opaque chrome fallback matching the built-in sidebar palette (the resolved
  * `--dsw-static-neutral-bluish-900` / `-50` tokens). An approximation for
- * custom themes: Windows swaps in the renderer's measured palette over the
- * windowsAppearance IPC, and macOS shows it only while minimized or hidden.
- * @returns the sidebar fill hex for the active system color scheme.
+ * custom themes: Windows captions use the renderer's measured palette over
+ * windowsAppearance IPC. The Windows workspace base stays opaque and follows
+ * the effective light/dark theme; macOS uses it only while minimized or hidden.
+ * @returns the sidebar fill hex for the effective application color scheme.
  */
 function chromeFallbackFill(): string {
   return nativeTheme.shouldUseDarkColors ? '#1b1b1c' : '#f9fafb'
@@ -288,6 +289,7 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
       autoHideMenuBar: true,
     } : {}),
     ...(process.platform === 'win32' && primary ? {
+      backgroundColor: chromeFallbackFill(),
       titleBarStyle: 'hidden' as const,
       titleBarOverlay: { height: WINDOWS_TITLEBAR_HEIGHT, color: chromeFallbackFill(),
         symbolColor: nativeTheme.shouldUseDarkColors ? '#f9fafb' : '#0f1115' },
@@ -314,6 +316,13 @@ function createWindow(preload: string, show = false, primary = false): BrowserWi
     },
   })
   if (!primary) configureProductContents(window, window.webContents)
+  if (process.platform === 'win32' && primary) {
+    const updateBackground = (): void => {
+      if (!window.isDestroyed()) window.setBackgroundColor(chromeFallbackFill())
+    }
+    nativeTheme.on('updated', updateBackground)
+    window.once('closed', () => { nativeTheme.removeListener('updated', updateBackground) })
+  }
   if (process.platform === 'darwin') {
     // Deminiaturize reattaches the NSVisualEffectView material late
     // (electron/electron#25368), so a transparent window shows the desktop
@@ -954,8 +963,12 @@ async function main(): Promise<void> {
   ipcMain.handle(PLATFORM_IPC.close, (event) => { assertMainApplication(event); platformView.close() })
   // Only the main window may synchronize its palette with the native material.
   ipcMain.on(DESKTOP_IPC.nativeThemeSet, (event, source: unknown) => {
-    if (mainWindow === undefined || event.sender !== productContents(mainWindow)) return
-    if (source === 'light' || source === 'dark' || source === 'system') nativeTheme.themeSource = source
+    const contents = currentProductContents()
+    if (contents === undefined || event.sender !== contents
+      || event.senderFrame !== contents.mainFrame
+      || !event.senderFrame.url.startsWith(`${SCHEME}://app/`)) return
+    if (source !== 'light' && source !== 'dark' && source !== 'system') return
+    nativeTheme.themeSource = source
   })
   ipcMain.handle(DESKTOP_IPC.localeBootstrap, async (event) => {
     const contents = currentProductContents()
@@ -1088,6 +1101,21 @@ async function main(): Promise<void> {
     }
     if (authenticationOperation !== undefined) {
       policyAuth?.focus(); updateDialog.focus()
+    }
+    if (!isMandatory() && (updates.state.phase === 'downloading' || updates.state.phase === 'verifying')) {
+      if (updateDialog.isOpen) {
+        updateDialog.focus()
+        return Promise.resolve()
+      }
+      const options = { type: 'info' as const, title: locale.messages.updateCheckTitle,
+        message: updates.state.phase === 'downloading' ? locale.messages.updateDownloadInProgress : locale.messages.updateVerifying,
+        detail: updates.state.phase === 'downloading' ? locale.messages.updateDownloadDetail : '', buttons: [locale.messages.updateClose], cancelId: 0,
+      }
+      return ordinaryMessageBox(options).then(() => {}).catch(async (error: unknown) => {
+        console.error(error)
+        try { await dialog.showMessageBox(options) }
+        catch (nativeError) { console.error(nativeError) }
+      })
     }
     let failedOperation: 'check' | 'download' | 'install' = 'check'
     promptOperation ??= Promise.resolve().then(async () => {
@@ -1475,6 +1503,7 @@ async function main(): Promise<void> {
     const window = mainWindow ?? createMainWindow()
     await navigateMain(applicationUrl)
     if (isQuitting() || recovery.active || window.isDestroyed()) return
+    if (process.platform === 'win32') window.setBackgroundColor(chromeFallbackFill())
     if (activate) window.show()
     else window.showInactive()
     enteredWorkspace = true
@@ -1558,6 +1587,7 @@ async function main(): Promise<void> {
     if (quitting || recovery.active) return
     const state = await readWelcomeState()
     if (isQuitting() || backend.state.phase !== 'ready') return
+    nativeTheme.themeSource = state.themePreference
     locale = resolveDesktopStartupLocale(state.localePreference, systemLanguages)
     writeDesktopLocaleCache(app.getPath('userData'), locale.id)
     windowsLanguage = locale.id
