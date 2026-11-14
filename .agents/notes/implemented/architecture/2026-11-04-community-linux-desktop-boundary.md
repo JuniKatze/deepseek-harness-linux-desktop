@@ -12,7 +12,7 @@ The community Linux package needs an independent executable, protocol, profile, 
 
 Community Linux behavior stays in the Electron Desktop shell. `apps/desktop/src/desktop-distribution.mjs` owns release identity and state-directory names, `desktop-capabilities.ts` owns product capabilities shared by the main process and preload, and `main-window-content.ts` owns the distinction between shell and product documents. `LinuxDesktopFrame` implements that document interface with a titlebar document and a separate workspace `WebContentsView`.
 
-The fork keeps `packages/` and `vendor/` unchanged during upstream synchronization. Linux-only behavior enters through Desktop build scripts, main-process lifecycle code, shell-owned preloads, renderer assets, tests, and Desktop documentation.
+The fork preserves upstream plugin composition and `vendor/` during upstream synchronization. Necessary cross-runtime compatibility fixes are confined to the existing owning implementation and its regression tests. Linux-only product behavior still enters only through Desktop build scripts, main-process lifecycle code, shell-owned preloads, renderer assets, tests, and Desktop documentation.
 
 ## Alternatives considered
 

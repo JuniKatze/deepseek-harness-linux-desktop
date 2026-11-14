@@ -12,7 +12,7 @@ Status: implemented
 
 社区 Linux 行为留在 Electron Desktop 壳中。`apps/desktop/src/desktop-distribution.mjs` 负责发布身份和状态目录名，`desktop-capabilities.ts` 负责主进程与 preload 共享的产品能力，`main-window-content.ts` 负责区分壳文档与产品文档。`LinuxDesktopFrame` 使用一个标题栏文档和一个独立的工作区 `WebContentsView` 实现该文档接口。
 
-分叉同步上游时保持 `packages/` 与 `vendor/` 不变。Linux 专用行为通过 Desktop 构建脚本、主进程生命周期、壳自有 preload、渲染资源、测试和 Desktop 文档进入。
+分叉同步上游时保留上游插件组合与 `vendor/`。必要的跨运行时兼容修正仅限于原有拥有者的实现及其回归测试。Linux 专属产品行为仍只通过 Desktop 构建脚本、主进程生命周期、壳自有 preload、渲染资源、测试和 Desktop 文档进入。
 
 ## 采用过的替代方案
 
