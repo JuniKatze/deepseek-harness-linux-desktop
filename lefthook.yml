@@ -21,8 +21,9 @@ pre-commit:
       run: node_modules/.bin/tsx scripts/run-oxlint.ts --config .oxlintrc.staged.json --fix --no-error-on-unmatched-pattern {staged_files}
       stage_fixed: true
 
+    # 同时核对固定上游的 index/worktree；仅纠正精确上游 EOF 空行的误报，不跳过 whitespace。
     - name: whitespace (staged)
-      run: git diff --cached --check
+      run: node scripts/verify-community-upstream.ts
 
     - name: pi-ai provider metadata
       glob: '{pnpm-lock.yaml,packages/llm/llm-pi-ai/package.json,packages/llm/llm-pi-ai/scripts/gen-provider-data.ts,packages/llm/llm-pi-ai/src/provider-data.generated.ts}'
@@ -45,5 +46,8 @@ pre-merge-commit:
 
 pre-push:
   jobs:
+    - name: community upstream
+      run: node scripts/verify-community-upstream.ts
+
     - name: typecheck
       run: pnpm run typecheck

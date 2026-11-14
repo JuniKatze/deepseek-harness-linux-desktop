@@ -61,7 +61,7 @@ export function createEnginePackageResolver(kitEntry: string | URL): EnginePacka
     } catch (error) {
       if (error instanceof Error && 'code' in error && error.code === 'MODULE_NOT_FOUND') {
         const installed = (fromKit.resolve.paths(name) ?? []).some(directory =>
-          lstatSync(join(directory, name), { throwIfNoEntry: false }) != null,
+          lstatSync(join(directory, name), { throwIfNoEntry: false }) !== undefined,
         )
         if (installed) throw new Error(`Installed LibreOfficeKit package is incomplete: ${name}. Reinstall the package.`, { cause: error })
       }

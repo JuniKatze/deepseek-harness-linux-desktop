@@ -173,5 +173,6 @@ describe('installer preparation preserves application dependencies', () => {
     }, 'darwin', 'arm64')
     const packaged = new Set(config.files.filter((entry): entry is string => typeof entry === 'string'))
     for (const name of referenced) expect(packaged.has(`lib/${name}`)).toBe(true)
+    expect(packaged.has('lib/host-node-preload.mjs')).toBe(true)
   })
 })

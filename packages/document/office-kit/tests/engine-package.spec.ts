@@ -78,31 +78,6 @@ it('uses physical native paths and preserves the WASM logical path in an archive
     .toBe('/App/resources/app.asar/dsh/node_modules/@deepseek-ai/libreoffice-kit-wasm/package.json')
 })
 
-it.each([null, undefined])('preserves the missing-package error when lstat reports %s', (missing) => {
-  const fixture = engineTree()
-  // Electron ASAR 的缺失路径可返回 null，超出 Node 自身类型声明的返回值。
-  // @ts-expect-error 模拟 Electron 的真实文件系统返回值。
-  vi.mocked(lstatSync).mockImplementation(() => missing)
-  const error = thrownBy(() => fixture.resolveEnginePackage(fixture.name))
-  expect(error).toMatchObject({ code: 'MODULE_NOT_FOUND' })
-  expect(error).toBe(fixture.resolve.mock.results[0]?.value)
-  expect(lstatSync).toHaveBeenCalledWith(expect.any(String), { throwIfNoEntry: false })
-})
-
-it.each([null, undefined])('reports an installed incomplete package after a missing search path returns %s', (missing) => {
-  const fixture = engineTree()
-  mkdirSync(join(fixture.root, 'node_modules', fixture.name), { recursive: true })
-  fixture.kit.resolve.paths = () => [join(fixture.root, 'absent-node-modules'), join(fixture.root, 'node_modules')]
-  // @ts-expect-error 模拟 Electron ASAR 与 Node 对缺失路径的两种返回值。
-  vi.mocked(lstatSync).mockImplementationOnce(() => missing)
-  const error = thrownBy(() => fixture.resolveEnginePackage(fixture.name))
-  expect(error).toBeInstanceOf(Error)
-  expect(error).not.toHaveProperty('code', 'MODULE_NOT_FOUND')
-  expect(error).toHaveProperty('cause', fixture.resolve.mock.results[0]?.value)
-  expect(error).toHaveProperty('message', expect.stringContaining(fixture.name))
-  expect(lstatSync).toHaveBeenCalledTimes(2)
-})
-
 it.each(['missing manifest', 'dangling symlink', 'absent'] as const)(
   'distinguishes an engine package with %s on the kit resolution path', (state) => {
     const fixture = engineTree()

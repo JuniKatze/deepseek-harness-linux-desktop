@@ -12,6 +12,14 @@ This repository is a community fork of [DeepSeek Harness](https://github.com/dee
 - amd64 / x86_64
 - Electron Desktop mode with the bundled DeepSeek Harness Desktop Host
 
+### Upstream plugin parity
+
+The first-party plugin sources and composition remain exactly those of `dsh-v0.2.2-rc.3`. The [fixed upstream check](scripts/verify-community-upstream.ts) protects the complete `packages/`, `vendor/`, `apps/cli/`, `apps/web/`, and `apps/desktop-host/` trees, including file bytes and Git modes. Linux-specific behavior belongs to Desktop; it must not modify plugin sources or rewrite first-party plugin files during packaging.
+
+From the repository root, run `pnpm run verify-community-upstream`. The check compares both the index and the working tree with fixed release fingerprints, rejects added source files, and does not fetch a branch or require a local tag object. Ignored build outputs are not source-tree inputs. Advance these fingerprints only when explicitly following another released version.
+
+The whitespace hook still runs the original Git check. It accepts the single EOF blank line already present in the fixed upstream file only after all protected trees and that file match their recorded hashes; every other whitespace diagnostic remains a failure. Do not reformat upstream plugin files to satisfy local checks.
+
 ### Package identity
 
 - Debian package: `dsh-desktop-linux`
@@ -67,6 +75,14 @@ The verified `.deb` is written under `apps/desktop/.desktop-build/targets/linux-
 - Debian 12 或 13
 - amd64 / x86_64
 - Electron Desktop 模式，并保留随包的 DeepSeek Harness Desktop Host
+
+### 上游插件一致性
+
+第一方插件源码和组合严格保持为 `dsh-v0.2.2-rc.3`。[固定上游检查](scripts/verify-community-upstream.ts)保护完整的 `packages/`、`vendor/`、`apps/cli/`、`apps/web/` 和 `apps/desktop-host/` 树，包括文件字节与 Git 模式。Linux 专属行为属于 Desktop，不得修改插件源码，也不得在打包时重写第一方插件文件。
+
+在仓库根运行 `pnpm run verify-community-upstream`。检查同时将 index 和工作树与固定发布指纹比较，拒绝新增源码文件，不拉取分支，也不要求本地存在 tag 对象。被忽略的构建产物不属于源码树输入。只有明确跟进另一个发布版本时，才能更新这些指纹。
+
+空白检查 hook 仍执行原始 Git 检查。只有所有保护树及特定文件均匹配记录哈希时，才接受固定上游文件原有的那一个 EOF 空行；其他空白诊断仍然失败。不要为通过本地检查而重新格式化上游插件文件。
 
 ### 包身份
 

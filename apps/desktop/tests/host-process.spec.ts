@@ -91,6 +91,25 @@ afterEach(async () => {
 })
 
 describe('desktop host process', () => {
+  it('preloads Node compatibility before the Host entry and contains it within child teardown', async () => {
+    const original = (await import('node:fs')).lstatSync
+    const runtime = projectWithHost(`
+import { lstatSync } from 'node:fs'
+if (lstatSync('missing', { throwIfNoEntry: false }) !== undefined) throw new Error('Host entry saw Electron null')
+process.send({ type: 'ready', url: 'http://127.0.0.1:3080/' })
+process.on('message', message => {
+  if (message.type === 'shutdown') process.send({ type: 'shutdown-complete' }, () => process.disconnect())
+})
+`)
+    const fixture = new URL('./fixtures/host-node-preload-check.mjs', import.meta.url).href
+    const host = hostProcess(runtime, runtime, undefined, {
+      ...process.env, DSH_PRELOAD_SCENARIO: 'electron-node',
+      NODE_OPTIONS: (process.env.NODE_OPTIONS ?? '') + ' --import=' + fixture,
+    })
+    await host.start()
+    await host.stop(true)
+    expect((await import('node:fs')).lstatSync).toBe(original)
+  })
   it('retains the announced run identity when startup fails before readiness', async () => {
     const runtime = projectWithHost(`
 process.send({ type: 'starting', runId: 'c254ab28-97c9-4382-95e6-2db9c66f98c8' })
