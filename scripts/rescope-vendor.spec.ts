@@ -87,6 +87,7 @@ describe('product identifiers', () => {
   it.each([
     'apps/cli/tests/optional-bundle-transitions.e2e.ts',
     'apps/web/tests/agent-preset-selection.e2e.ts',
+    'apps/web/tests/creator-persona.e2e.ts',
     'apps/web/tests/developer-tools-settings.e2e.ts',
     'docs/subsystems/extensions.md',
     'docs/subsystems/extensions.zh.md',
@@ -98,6 +99,8 @@ describe('product identifiers', () => {
     'docs/upgrade-guide/v0.2.1-alpha.1/subagent-preset-composition/guide.zh.md',
     'docs/upgrade-guide/v0.2.2-alpha.2/fs-observation-policy-default-off/guide.md',
     'docs/upgrade-guide/v0.2.2-alpha.2/fs-observation-policy-default-off/guide.zh.md',
+    'docs/upgrade-guide/v0.2.2-rc.1/subagent-interrupt-default/guide.md',
+    'docs/upgrade-guide/v0.2.2-rc.1/subagent-interrupt-default/guide.zh.md',
     'docs/user/guide/schedule.md',
     'docs/user/guide/schedule.zh.md',
     'packages/bundle/web-app/cordis.patch.yml',
@@ -121,6 +124,17 @@ describe('product identifiers', () => {
     expect(text).toMatch(/(['"`])cordis(?:\/inspect-query(?:-resolved)?)?\1/)
     expect(isRescopeExcluded(file)).toBe(false)
     expect(rescopeText(text, file)).toEqual({ text, lines: 0 })
+  })
+
+  it.each([
+    'apps/web/tests/creator-persona.e2e.ts',
+    'docs/upgrade-guide/v0.2.2-rc.1/subagent-interrupt-default/guide.md',
+    'docs/upgrade-guide/v0.2.2-rc.1/subagent-interrupt-default/guide.zh.md',
+  ])('rewrites package imports without changing the preset id in %s', (file) => {
+    const source = "const preset = 'cordis'\nimport { Context } from 'cordis'\n"
+    const target = "const preset = 'cordis'\nimport { Context } from '@deepseek-ai/cordis'\n"
+    const wrap = (text: string): string => file.endsWith('.md') ? `The \`cordis\` preset.\n\`\`\`ts\n${text}\`\`\`\n` : text
+    expectRoundTrip(file, wrap(source), wrap(target), 1)
   })
 
   it('still renames other libraries in a preset consumer and reverses them', () => {
