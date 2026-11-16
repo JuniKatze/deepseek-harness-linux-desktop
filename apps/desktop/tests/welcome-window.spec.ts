@@ -7,6 +7,7 @@ const electron = vi.hoisted(() => ({
   create: vi.fn<(options: unknown) => ReturnType<typeof createWindow>>(),
   root: '/desktop-app',
   handlers: new Map<string, (event: unknown, value?: unknown, attributes?: unknown) => Promise<unknown>>(),
+  theme: { dark: false, listeners: new Set<() => void>() },
 }))
 vi.mock('electron', () => ({
   app: { getAppPath: () => electron.root },
@@ -17,6 +18,11 @@ vi.mock('electron', () => ({
       electron.handlers.set(name, handler)
     },
     removeHandler: (name: string) => electron.handlers.delete(name),
+  },
+  nativeTheme: {
+    get shouldUseDarkColors() { return electron.theme.dark },
+    on: (_event: string, listener: () => void) => { electron.theme.listeners.add(listener) },
+    removeListener: (_event: string, listener: () => void) => { electron.theme.listeners.delete(listener) },
   },
 }))
 
@@ -30,6 +36,7 @@ function createWindow() {
       on: vi.fn<(name: string, handler: (event: { preventDefault(): void }) => void) => void>(),
     },
     loadFile: vi.fn<(path: string) => Promise<undefined>>().mockResolvedValue(undefined),
+    setBackgroundColor: vi.fn<(color: string) => void>(),
     isDestroyed: vi.fn().mockReturnValue(false),
     destroy: vi.fn(),
     show: vi.fn(),
@@ -37,7 +44,12 @@ function createWindow() {
   }
 }
 
-beforeEach(() => { electron.create.mockReset(); electron.handlers.clear() })
+beforeEach(() => {
+  electron.create.mockReset()
+  electron.handlers.clear()
+  electron.theme.dark = false
+  electron.theme.listeners.clear()
+})
 
 const operations = {
   analyticsEnabled: async () => true,
@@ -62,10 +74,12 @@ describe('desktop welcome window', () => {
     })
     expect(options.webPreferences?.preload).toMatch(/preload-welcome\.cjs$/u)
     if (platform === 'darwin') {
+      expect(options.backgroundColor).toBe('#00000000')
       expect(options.vibrancy).toBe('menu')
       expect(options.visualEffectState).toBe('active')
       expect(options.trafficLightPosition).toEqual({ x: 21, y: 21 })
     } else if (platform === 'win32') {
+      expect(options.backgroundColor).toBe('#00000000')
       expect(options.backgroundMaterial).toBe('acrylic')
       expect(options.titleBarOverlay).toMatchObject({ height: 42 })
     } else {
@@ -73,6 +87,21 @@ describe('desktop welcome window', () => {
       expect(options.vibrancy).toBeUndefined()
       expect(options.backgroundMaterial).toBeUndefined()
     }
+  })
+
+  it('follows the resolved appearance for the opaque Linux fill', () => {
+    electron.theme.dark = true
+    expect(welcomeWindowOptions('linux', resolveDesktopLocale('en')).backgroundColor).toBe('#1b1b1c')
+    expect(welcomeWindowOptions('darwin', resolveDesktopLocale('en')).backgroundColor).toBe('#00000000')
+  })
+
+  it('repaints the fill when the system appearance changes', async () => {
+    const window = createWindow()
+    electron.create.mockReturnValue(window)
+    await openWelcomeWindow(resolveDesktopLocale('en'), operations)
+    electron.theme.dark = true
+    for (const listener of electron.theme.listeners) listener()
+    expect(window.setBackgroundColor).toHaveBeenLastCalledWith('#1b1b1c')
   })
 
   it('waits for its local document and blocks renderer navigation', async () => {

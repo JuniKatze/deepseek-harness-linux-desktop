@@ -3,9 +3,22 @@ import type { SignInAttemptId } from '@deepseek-ai/dsh-deepseek-account/types'
 
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { app, BrowserWindow, ipcMain, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, nativeTheme, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent } from 'electron'
 import type { DesktopLocale } from './locale.ts'
 import { WELCOME_IPC, type WelcomeOperations } from './welcome-api.ts'
+
+/**
+ * Resolve the opaque welcome-window fill used where no native material supplies the background.
+ * The renderer's dark tint multiplies onto this fill; Linux has no material behind it, so a fixed
+ * white fill composites the 50% dark tint into unreadable mid-grey. The fill therefore follows the
+ * resolved appearance, while platforms with native material keep a transparent fill.
+ * @param platform - operating system hosting Electron.
+ * @returns transparent where the platform owns the material, otherwise the current appearance fill.
+ */
+export function welcomeWindowBackground(platform: NodeJS.Platform): string {
+  if (platform === 'darwin' || platform === 'win32') return '#00000000'
+  return nativeTheme.shouldUseDarkColors ? '#1b1b1c' : '#FFFFFF'
+}
 
 /**
  * Resolve the fixed-size welcome window's native material and controls.
@@ -24,7 +37,7 @@ export function welcomeWindowOptions(platform: NodeJS.Platform, locale: DesktopL
     fullscreenable: false,
     show: false,
     title: locale.messages.welcomeTitle,
-    backgroundColor: platform === 'darwin' || platform === 'win32' ? '#00000000' : '#FFFFFF',
+    backgroundColor: welcomeWindowBackground(platform),
     ...(platform === 'darwin' ? {
       titleBarStyle: 'hidden',
       trafficLightPosition: { x: 21, y: 21 },
@@ -114,6 +127,11 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     return operations.copySignInLink(id as SignInAttemptId)
   })
   window.once('closed', disposeHandlers)
+  const applyBackground = (): void => {
+    if (!window.isDestroyed()) window.setBackgroundColor(welcomeWindowBackground(process.platform))
+  }
+  nativeTheme.on('updated', applyBackground)
+  window.once('closed', () => nativeTheme.removeListener('updated', applyBackground))
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event) => { event.preventDefault() })
   try {
@@ -123,7 +141,7 @@ export async function openWelcomeWindow(locale: DesktopLocale, operations: Welco
     if (!window.isDestroyed()) window.destroy()
     throw error
   }
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Another window can replace ownership during loadFile.
+  // Another window can replace ownership during loadFile.
   if (active && !window.isDestroyed()) {
     window.show()
     void operations.analytics?.('auth_page_view', {})
